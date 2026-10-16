@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit" xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+	
+	<munit:config name="system-api-test-suite.xml" />
+	
+	<munit:test name="system-api-snapshot-test" description="Test warehouse snapshot processing and data validation">
+		<munit:behavior>
+			<!-- Mock database bulk operations so the unit test runs in complete isolation -->
+			<munit-tools:mock-when processor="db:bulk-update">
+				<munit-tools:then-return />
+			</munit-tools:mock-when>
+		</munit:behavior>
+		
+		<munit:execution>
+    <munit:set-event>
+        <!-- Use a valid timestamp matching yyyyMMddHHmm format -->
+        <munit:payload value="#[{ sourceFileName: 'STOCK_WHHYD01_202610152357.csv', validRows: [{ sku: 'SKU-HOME-5013', availableQty: 15 }] }]"/>
+        <munit:variables>
+            <munit:variable key="correlationId" value="test-correlation-123"/>
+            <munit:variable key="sourceFileName" value="STOCK_WHHYD01_202610152357.csv"/>
+        </munit:variables>
+    </munit:set-event>
+    
+    <flow-ref doc:name="Flow-ref to inventory-process-snapshot-flow" name="inventory-process-snapshot-flow"/>
+</munit:execution>
+		
+		<munit:validation>
+			<!-- Assert that the output response or payload is generated successfully -->
+			<munit-tools:assert-that expression="#[payload]" is="#[MunitTools::notNullValue()]" message="Payload should not be null"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

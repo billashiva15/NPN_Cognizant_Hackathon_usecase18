@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd 
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd 
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <sub-flow name="inventory-validate-file-flow" doc:id="eabd04d1-f84f-46b2-9811-893c0e52e99a">
+
+        <!-- Step 1: Format and structure incoming raw rows -->
+        <ee:transform doc:name="Format Incoming Rows">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+import * from dw::core::Strings
+
+fun formatRow(row) = {
+    sku: trim(row.sku default ""),
+    location: trim(row.location default ""),
+    countedQty: trim(row.countedQty default "0"),
+    unitCost: trim(row.unitCost default "0.00"),
+    currency: trim(row.currency default "USD"),
+    countedAt: trim(row.countedAt default ""),
+    uom: trim(row.uom default "EA")
+}
+---
+if (isEmpty(payload)) 
+    []
+else 
+    do {
+        var parsedPayload = payload match {
+            case data is Array -> data
+            case data is String -> read(data, "application/csv", { header: true, separator: "," })
+            case data is Binary -> read(data, "application/csv", { header: true, separator: "," })
+            else -> []
+        }
+        ---
+        if (parsedPayload is Array) 
+            parsedPayload map ((row) -> formatRow(row))
+        else 
+            []
+    }]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <!-- Step 2: Validate rows using your external DWL script -->
+        <ee:transform doc:name="Validate Rows via DWL">
+            <ee:message>
+                <ee:set-payload resource="dwl/validate-inventory-rows.dwl" />
+            </ee:message>
+        </ee:transform>
+
+        <!-- Step 3: Split into Valid and Invalid rows (Store in Variables to prevent loss) -->
+        <ee:transform doc:name="Store Valid and Invalid Rows">
+            <ee:variables>
+                <ee:set-variable variableName="validRows"><![CDATA[%dw 2.0
+output application/java
+---
+payload filter ((r) -> r.valid)]]></ee:set-variable>
+                <ee:set-variable variableName="invalidRows"><![CDATA[%dw 2.0
+output application/java
+---
+payload filter ((r) -> !r.valid)]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <!-- Step 4: Decision Tree -->
+        <choice doc:name="Are There Rejects?">
+            <when expression="#[sizeOf(vars.invalidRows default []) > 0]">
+                <ee:transform doc:name="Format Rejects Payload">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    fileName: vars.sourceFileName default "unknown_file.csv",
+    rejects: vars.invalidRows map (item) -> {
+        lineNumber: item.lineNumber,
+        sku: item.sku,
+        location: item.location,
+        countedQty: item.availableQty,
+        reasonCode: item.reasonCode,
+        reason: item.reason
+    }
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+                
+                <!-- Send rejects to SAPI and store response in a variable so it doesn't overwrite payload -->
+                <http:request method="POST" config-ref="HTTP_Request_configuration" path="/save-rejects" target="sapiRejectResponse" doc:name="Send Rejects to SAPI"/>
+            </when>
+            
+            <otherwise>
+                <logger level="INFO" doc:name="No Rejects Logger" message="#['All rows passed validation successfully in Process API layer.']"/>
+            </otherwise>
+        </choice>
+
+        <!-- Step 5: Pass valid rows forward safely -->
+        <set-payload value="#[vars.validRows]" doc:name="Set Payload to Valid Rows Only"/>
+
+    </sub-flow>
+
+</mule>

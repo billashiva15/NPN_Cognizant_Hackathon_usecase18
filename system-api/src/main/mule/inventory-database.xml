@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:db="http://www.mulesoft.org/schema/mule/db"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ====================================================== -->
+    <!-- SAPI HTTP LISTENER ENDPOINT FOR SNAPSHOT PROCESSING     -->
+    <!-- Receives valid rows and metadata from Process API (PAPI)-->
+    <!-- ====================================================== -->
+    <flow name="sapi-process-snapshot-endpoint-flow" doc:id="f276a659-069f-4d21-8d42-17601fd119af">
+        <http:listener config-ref="HTTP_Listener_config" path="/process-snapshot" doc:name="SAPI Listener /process-snapshot"/>
+        
+        <logger level="INFO" doc:name="Log SAPI Snapshot Request" message="#['[SAPI] Received snapshot request for file: ' ++ (payload.sourceFileName default 'unknown')]"/>
+
+        <!-- Extract payload attributes passed from PAPI -->
+        <set-variable variableName="sourceFileName" value="#[payload.sourceFileName]" doc:name="Set Source File Name"/>
+        <set-variable variableName="correlationId" value="#[payload.correlationId]" doc:name="Set Correlation ID"/>
+        <set-variable variableName="validRows" value="#[payload.validRows]" doc:name="Set Valid Rows"/>
+        <set-variable variableName="invalidRows" value="#[payload.invalidRows default []]" doc:name="Set Invalid Rows"/>
+
+        <!-- Invoke the core database snapshot processing flow -->
+        <flow-ref name="inventory-process-snapshot-flow" doc:name="Call Database Snapshot Logic"/>
+
+        <ee:transform doc:name="Build SAPI Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status: vars.loadStatus default "SUCCESS",
+    correlationId: vars.correlationId,
+    message: "Snapshot processed and persisted successfully in SAPI database."
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- ====================================================== -->
+    <!-- 1. Master Sub-Flow: Process Snapshot & Status Checks    -->
+    <!-- ====================================================== -->
+    <sub-flow name="inventory-process-snapshot-flow" doc:id="2a23e06f-3c4c-407f-b541-87d5b1414040">
+        <logger level="INFO" doc:name="Start Snapshot Processing" message="#['[SAPI Correlation ID: ' ++ vars.correlationId ++ '] Processing warehouse snapshot: ' ++ vars.sourceFileName]"/>
+
+        <!-- Extract Warehouse Code and Timestamp from filename -->
+        <ee:transform doc:name="Extract Snapshot Metadata">
+            <ee:variables>
+                <ee:set-variable variableName="warehouseCode"><![CDATA[
+%dw 2.0
+output application/java
+---
+(vars.sourceFileName splitBy "_")[1]
+                ]]></ee:set-variable>
+                <ee:set-variable variableName="snapshotTimestamp"><![CDATA[
+%dw 2.0
+output application/java
+var timestampText = ((vars.sourceFileName splitBy "_")[2]) replace ".csv" with ""
+---
+timestampText as LocalDateTime {format: "yyyyMMddHHmm"}
+                ]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <!-- Check for Duplicate File Name or Checksum in snapshot_log -->
+        <db:select config-ref="Database_Config" doc:name="Check Duplicate Snapshot">
+            <db:sql><![CDATA[
+                SELECT snapshot_id, file_name, status FROM snapshot_log WHERE file_name = :fileName LIMIT 1
+            ]]></db:sql>
+            <db:input-parameters><![CDATA[
+                #[{fileName: vars.sourceFileName}]
+            ]]></db:input-parameters>
+        </db:select>
+
+        <choice doc:name="Duplicate File Decision">
+            <when expression="#[!isEmpty(payload)]">
+                <logger level="WARN" doc:name="Log Duplicate Skipped" message="#['Duplicate file detected: ' ++ vars.sourceFileName ++ '. Skipping processing.']"/>
+                <set-variable variableName="loadStatus" value="SKIPPED_DUPLICATE" doc:name="Set Status Duplicate"/>
+            </when>
+            <otherwise>
+                <!-- Check Latest Completed Snapshot for Stale Snapshot Validation -->
+                <db:select config-ref="Database_Config" doc:name="Check Latest Warehouse Snapshot">
+                    <db:sql><![CDATA[
+                        SELECT snapshot_ts FROM snapshot_log WHERE warehouse_code = :warehouseCode AND status = 'PROCESSED' ORDER BY snapshot_ts DESC LIMIT 1
+                    ]]></db:sql>
+                    <db:input-parameters><![CDATA[
+                        #[{warehouseCode: vars.warehouseCode}]
+                    ]]></db:input-parameters>
+                </db:select>
+
+                <choice doc:name="Stale Snapshot Decision">
+                    <when expression='#[!isEmpty(payload) and (vars.snapshotTimestamp as String) &lt;= (payload[0].snapshot_ts as String)]'>
+                        <db:insert config-ref="Database_Config" doc:name="Record Stale Snapshot Log">
+                            <db:sql><![CDATA[
+                                INSERT INTO snapshot_log (file_name, file_checksum, warehouse_code, snapshot_ts, status, total_rows, accepted_rows, rejected_rows, correlation_id, started_at, finished_at)
+                                VALUES (:fileName, :fileChecksum, :warehouseCode, :snapshotTs, 'SKIPPED_STALE', 0, 0, 0, :correlationId, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            ]]></db:sql>
+                            <db:input-parameters><![CDATA[
+                                #[{
+                                    fileName: vars.sourceFileName, 
+                                    fileChecksum: vars.fileChecksum default 'STALE_CHK', 
+                                    warehouseCode: vars.warehouseCode, 
+                                    snapshotTs: vars.snapshotTimestamp, 
+                                    correlationId: vars.correlationId
+                                }]
+                            ]]></db:input-parameters>
+                        </db:insert>
+                        <logger level="WARN" doc:name="Log Stale Skipped" message="#['Stale snapshot skipped: ' ++ vars.sourceFileName ++ '. Older than latest processed high-water mark.']"/>
+                        <set-variable variableName="loadStatus" value="SKIPPED_STALE" doc:name="Set Status Stale"/>
+                    </when>
+                    <otherwise>
+                        <!-- Initialize Snapshot Log as IN_PROGRESS -->
+                        <db:insert config-ref="Database_Config" doc:name="Create IN_PROGRESS Snapshot Log">
+                            <db:sql><![CDATA[
+                                INSERT INTO snapshot_log (file_name, file_checksum, warehouse_code, snapshot_ts, status, total_rows, accepted_rows, rejected_rows, correlation_id, started_at)
+                                VALUES (:fileName, :fileChecksum, :warehouseCode, :snapshotTs, 'IN_PROGRESS', :totalRows, 0, 0, :correlationId, CURRENT_TIMESTAMP)
+                            ]]></db:sql>
+                            <db:input-parameters><![CDATA[
+                                #[{
+                                    fileName: vars.sourceFileName,
+                                    fileChecksum: vars.fileChecksum default uuid(),
+                                    warehouseCode: vars.warehouseCode,
+                                    snapshotTs: vars.snapshotTimestamp,
+                                    totalRows: sizeOf(vars.validRows default []) + sizeOf(vars.invalidRows default []),
+                                    correlationId: vars.correlationId
+                                }]
+                            ]]></db:input-parameters>
+                        </db:insert>
+
+                        <!-- Retrieve Generated snapshot_id -->
+                        <db:select config-ref="Database_Config" doc:name="Fetch Snapshot ID">
+                            <db:sql><![CDATA[
+                                SELECT snapshot_id FROM snapshot_log WHERE file_name = :fileName LIMIT 1
+                            ]]></db:sql>
+                            <db:input-parameters><![CDATA[
+                                #[{fileName: vars.sourceFileName}]
+                            ]]></db:input-parameters>
+                        </db:select>
+
+                        <set-variable variableName="snapshotId" value="#[payload[0].snapshot_id]"/>
+
+                        <!-- Proceed to Batch Upsert Valid Stock Records & Audit Movements -->
+                        <flow-ref name="db-upsert-absolute-inventory-levels" doc:name="Call Batch Stock Upsert"/>
+
+                        <!-- Complete Snapshot Log as PROCESSED -->
+                        <db:update config-ref="Database_Config" doc:name="Mark Snapshot PROCESSED">
+                            <db:sql><![CDATA[
+                                UPDATE snapshot_log 
+                                SET status = 'PROCESSED', 
+                                    accepted_rows = :acceptedCount, 
+                                    rejected_rows = :rejectedCount, 
+                                    finished_at = CURRENT_TIMESTAMP
+                                WHERE snapshot_id = :snapshotId
+                            ]]></db:sql>
+                            <db:input-parameters><![CDATA[
+                                #[{
+                                    snapshotId: vars.snapshotId,
+                                    acceptedCount: sizeOf(vars.validRows default []),
+                                    rejectedCount: sizeOf(vars.invalidRows default [])
+                                }]
+                            ]]></db:input-parameters>
+                        </db:update>
+
+                        <logger level="INFO" doc:name="Log Snapshot Complete" message="#['[Correlation ID: ' ++ vars.correlationId ++ '] Snapshot successfully processed and saved to database: ' ++ vars.sourceFileName]"/>
+                        <set-variable variableName="loadStatus" value="SUCCESS" doc:name="Set Status Success"/>
+                    </otherwise>
+                </choice>
+            </otherwise>
+        </choice>
+
+    </sub-flow>
+
+    <!-- ====================================================== -->
+    <!-- 2. Sub-Flow: High-Performance Batch Upsert            -->
+    <!-- ====================================================== -->
+    <sub-flow name="db-upsert-absolute-inventory-levels" doc:id="c27f8254-26b8-4e36-9d0c-04791bc6efd8">
+        <ee:transform doc:name="Format Valid Rows for Bulk SQL">
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/java
+---
+(vars.validRows default []) map (row) -> {
+    sku: row.sku,
+    location: row.location default row.locationCode,
+    qty: row.countedQty default row.qty default 0,
+    unitCost: row.unitCost default 0.0,
+    countedAt: row.countedAt,
+    snapshotId: vars.snapshotId,
+    correlationId: vars.correlationId
+}
+                ]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <!-- Save mapped list to a variable so the second insert doesn't receive the count integer -->
+        <set-variable variableName="originalStockPayload" value="#[payload]" doc:name="Set originalStockPayload"/>
+
+        <!-- TRY SCOPE: Atomically execute bulk stock upserts and audit recordings -->
+        <try doc:name="Absolute State Ingestion Transaction Container">
+            
+            <!-- Bulk Insert/Upsert into inventory_stock -->
+            <db:bulk-insert config-ref="Database_Config" doc:name="DB: Bulk Upsert Inventory Stock">
+                <db:sql><![CDATA[
+                    INSERT INTO inventory_stock (sku, location_code, available_qty, unit_cost, last_counted_at, snapshot_id, updated_at)
+                    VALUES (:sku, :location, :qty, :unitCost, :countedAt, :snapshotId, CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE 
+                        available_qty = VALUES(available_qty), 
+                        unit_cost = VALUES(unit_cost), 
+                        last_counted_at = VALUES(last_counted_at), 
+                        snapshot_id = VALUES(snapshot_id),
+                        updated_at = CURRENT_TIMESTAMP
+                ]]></db:sql>
+            </db:bulk-insert>
+
+            <!-- Restore original array payload -->
+            <set-payload value="#[vars.originalStockPayload]" doc:name="Restore Payload"/>
+
+            <!-- Bulk Insert into stock_movements audit log -->
+            <db:bulk-insert config-ref="Database_Config" doc:name="DB: Bulk Insert Stock Movements Audit">
+                <db:sql><![CDATA[
+                    INSERT INTO stock_movements (sku, location_code, previous_qty, new_qty, delta_qty, snapshot_id, correlation_id, recorded_at)
+                    VALUES (:sku, :location, 0, :qty, :qty, :snapshotId, :correlationId, CURRENT_TIMESTAMP)
+                ]]></db:sql>
+            </db:bulk-insert>
+
+            <error-handler>
+                <on-error-continue doc:name="On Error Continue -> Map to Database Write Fail">
+                    <logger level="ERROR" doc:name="Log Database Write Failure" message="#['[Correlation ID: ' ++ vars.correlationId ++ '] Database batch transaction failed: ' ++ error.description]"/>
+                    <set-variable variableName="dbWriteError" value="#[error.description]"/>
+                </on-error-continue>
+            </error-handler>
+        </try>
+    </sub-flow>
+
+</mule>

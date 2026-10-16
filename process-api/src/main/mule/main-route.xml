@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" 
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" 
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" 
+      xmlns:http="http://www.mulesoft.org/schema/mule/http" 
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd 
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd 
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ====================================================== -->
+    <!-- PROCESS API MAIN ROUTER FLOW                          -->
+    <!-- Listens on port 8082 and routes based on URI & Method -->
+    <!-- ====================================================== -->
+    <flow name="process-api-main-router-flow" doc:id="9f83e56a-b339-46a4-b31a-324ad6ff8f68">
+        <http:listener config-ref="HTTP_Listener_config" path="/process/*" doc:name="PAPI HTTP Listener">
+            <http:response statusCode="#[vars.httpStatus default 200]">
+                <http:headers><![CDATA[#[vars.outboundHeaders default {}]]]></http:headers>
+            </http:response>
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body><![CDATA[#[payload]]]></http:body>
+                <http:headers><![CDATA[#[vars.outboundHeaders default {}]]]></http:headers>
+            </http:error-response>
+        </http:listener>
+
+        <logger level="INFO" doc:name="Log Incoming Request" message="#['PAPI Received Request: ' ++ attributes.method ++ ' ' ++ attributes.requestPath]"/>
+
+        <!-- Route incoming requests based on path and method patterns -->
+        <choice doc:name="Route to Appropriate Orchestration">
+            
+            <!-- 1. Stock Endpoints -->
+            <when expression="#[attributes.requestPath contains '/stock']">
+                <!-- Update this name to match your exact flow name in validation-orchestration.xml if different -->
+                <flow-ref name="inventory-validate-file-flow" doc:name="Call Stock Orchestration" doc:id="1ef09d0e-72d7-4ca0-8d7b-0c7f0130b2cc"/>
+            </when>
+
+            <!-- 2. Reorder Endpoints (Routes HTTP traffic to the AMQP publisher) -->
+            <when expression="#[attributes.requestPath contains '/reorders']">
+                <flow-ref name="http-to-amqp-reorder-publisher" doc:name="Call Reorder AMQP Publisher"/>
+            </when>
+
+            <!-- 3. Ingestion Jobs Endpoints -->
+            <when expression="#[attributes.requestPath contains '/ingestion-jobs']">
+                <!-- Update this name to match your exact flow name in file-ingestion or validation XML -->
+                <flow-ref name="inventory-validate-file-flow" doc:name="Call Ingestion Jobs Orchestration" doc:id="040438bf-1038-4feb-97fd-2ee29dc52b71"/>
+            </when>
+
+            <!-- Fallback: Endpoint Not Supported -->
+            <otherwise>
+                <raise-error doc:name="Raise 404 Not Found" type="PAPI:NOT_FOUND" description="The requested path is not supported by the Process API layer."/>
+            </otherwise>
+            
+        </choice>
+    </flow>
+
+</mule>

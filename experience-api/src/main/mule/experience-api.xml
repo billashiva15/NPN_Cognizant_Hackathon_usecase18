@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns="http://www.mulesoft.org/schema/mule/core" 
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" 
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" 
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd 
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd 
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <db:config name="Database_Config" doc:name="Database Config" doc:id="9bf94d53-7491-485b-b41e-5659138f775e" >
+		<db:my-sql-connection host="localhost" port="3306" user="root" password="root123" database="npn_retail_inventory_db" />
+	</db:config>
+
+    <!-- 1. GET /stock -->
+	<flow name="get:\stock:inventory-config">
+        <db:select config-ref="Database_Config" doc:name="Select All Stock">
+            <db:sql><![CDATA[SELECT * FROM inventory_stock]]></db:sql>
+        </db:select>
+        <ee:transform doc:name="Transform Stock List">
+            <ee:message>
+                <ee:set-payload resource="dwl/transform-stock-list.dwl" />
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- 2. GET /stock/{sku} -->
+    <flow name="get:\stock\(sku):inventory-config">
+        <ee:transform doc:name="Extract SKU Variable">
+            <ee:variables>
+                <ee:set-variable variableName="sku">attributes.uriParams.'sku'</ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <db:select config-ref="Database_Config" doc:name="Select Single Stock by SKU">
+            <db:sql><![CDATA[SELECT * FROM inventory_stock WHERE sku = :sku]]></db:sql>
+            <db:input-parameters><![CDATA[#[{
+                sku: vars.sku
+            }]]]></db:input-parameters>
+        </db:select>
+        <ee:transform doc:name="Transform Single Stock">
+            <ee:message>
+                <ee:set-payload resource="dwl/transform-single-stock.dwl" />
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- 3. GET /reorders -->
+    <flow name="get:\reorders:inventory-config">
+        <db:select config-ref="Database_Config" doc:name="Select Reorders">
+            <db:sql><![CDATA[SELECT * FROM purchase_orders ORDER BY raised_at DESC LIMIT 100]]></db:sql>
+        </db:select>
+        <ee:transform doc:name="Transform Reorders">
+            <ee:message>
+                <ee:set-payload resource="dwl/transform-reorders.dwl" />
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- 4. GET /ingestion-jobs -->
+    <flow name="get:\ingestion-jobs:inventory-config">
+        <db:select config-ref="Database_Config" doc:name="Select Ingestion Jobs">
+            <db:sql><![CDATA[SELECT * FROM ingestion_jobs ORDER BY processed_at DESC LIMIT 50]]></db:sql>
+        </db:select>
+        <ee:transform doc:name="Transform Ingestion Jobs">
+            <ee:message>
+                <ee:set-payload resource="dwl/transform-ingestion-jobs.dwl" />
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- 5. GET /ingestion-jobs/{snapshotId}/rejects -->
+    <flow name="get:\ingestion-jobs\(snapshotId)\rejects:inventory-config">
+        <ee:transform doc:name="Extract SnapshotId Variable">
+            <ee:variables>
+                <ee:set-variable variableName="snapshotId">attributes.uriParams.'snapshotId'</ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <db:select config-ref="Database_Config" doc:name="Select Rejects">
+            <db:sql><![CDATA[SELECT * FROM ingestion_rejects WHERE snapshot_id = :snapshotId]]></db:sql>
+            <db:input-parameters><![CDATA[#[{
+                snapshotId: vars.snapshotId
+            }]]]></db:input-parameters>
+        </db:select>
+        <ee:transform doc:name="Transform Rejects">
+            <ee:message>
+                <ee:set-payload resource="dwl/transform-rejects.dwl" />
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- 6. POST /reorders/manual/{sku} -->
+    <flow name="post:\reorders\manual\(sku):inventory-config">
+        <ee:transform doc:name="Extract SKU Variable">
+            <ee:variables>
+                <ee:set-variable variableName="sku">attributes.uriParams.'sku'</ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <ee:transform doc:name="Transform Manual Reorder">
+            <ee:message>
+                <ee:set-payload resource="dwl/transform-manual-reorder.dwl" />
+            </ee:message>
+        </ee:transform>
+        <set-variable variableName="responsePayload" value="#[payload]" doc:name="Save Response Payload"/>
+        <db:insert config-ref="Database_Config" doc:name="Insert Manual Purchase Order">
+            <db:sql><![CDATA[INSERT INTO purchase_orders (po_number, supplier_code, sku, warehouse_code, ordered_qty, status, idempotency_key, raised_at)
+            VALUES (:poNumber, 'SUP-001', :sku, 'WHHYD01', 50, :status, :idempotencyKey, CURRENT_TIMESTAMP)]]></db:sql>
+            <db:input-parameters><![CDATA[#[{
+                poNumber: payload.poNumber,
+                sku: payload.sku,
+                status: payload.status,
+                idempotencyKey: uuid()
+            }]]]></db:input-parameters>
+        </db:insert>
+        <set-payload value="#[vars.responsePayload]" doc:name="Restore Response Payload"/>
+    </flow>
+
+</mule>

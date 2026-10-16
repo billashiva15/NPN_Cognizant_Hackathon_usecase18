@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit" xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+	
+	<munit:config name="procurement-alert-orchestration-test-suite.xml" />
+	
+	<munit:test name="procurement-alert-orchestration-test-suite-procurement-alerts-scheduled-flowTest" doc:id="1ebf12a8-d080-48b4-98f3-27b30046dbeb" description="Test scheduled procurement alert flow">
+		<munit:behavior>
+			<!-- Mock the outbound HTTP request and return proper JSON string content -->
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:then-return>
+					<munit-tools:payload value='#[write([{ sku: "SKU-HOME-5013", available_qty: 2, reorder_point: 10, reorder_qty: 50, supplier_code: "SUPP-01" }], "application/json")]' />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		
+		<munit:execution >
+			<flow-ref doc:name="Flow-ref to procurement-alerts-scheduled-flow" doc:id="a4a5d0df-154d-4fb8-acc9-a75f0d659fb8" name="procurement-alerts-scheduled-flow"/>
+		</munit:execution>
+		
+		<munit:validation>
+			<munit-tools:assert-that expression="#[payload]" is="#[MunitTools::notNullValue()]"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

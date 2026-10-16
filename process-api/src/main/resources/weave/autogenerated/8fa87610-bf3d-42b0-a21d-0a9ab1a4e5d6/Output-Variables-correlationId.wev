@@ -1,0 +1,4 @@
+%dw 2.0
+
+type auto_8fa87610_bf3d_42b0_a21d_0a9ab1a4e5d6_Output_Variables_correlationId = Any
+

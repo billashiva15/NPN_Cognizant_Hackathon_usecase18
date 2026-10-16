@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:file="http://www.mulesoft.org/schema/mule/file"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+	
+	<flow name="inventory-file-ingestion-flow" doc:id="b6a59b5b-8659-4e29-a468-36609c419de1">
+        <file:listener doc:name="Poll Inventory CSV Files" 
+                        directory="C:\data\inventory\inbound" 
+                        recursive="false" 
+                        timeBetweenSizeCheck="2000">
+            <scheduling-strategy>
+                <fixed-frequency frequency="60000"/>
+            </scheduling-strategy>
+        </file:listener>
+        
+        <set-variable variableName="sourceFileName" value="#[attributes.fileName]" doc:name="Capture Source Filename"/>
+        <set-variable variableName="correlationId" value="#['file-' ++ vars.sourceFileName]" doc:name="Generate Correlation ID"/>
+
+        <logger level="INFO" doc:name="Log Detected Warehouse File" message="#['[Correlation ID: ' ++ vars.correlationId ++ '] Inventory poll detected file: ' ++ vars.sourceFileName]"/>
+
+        <set-variable variableName="filePayload" value="#[payload]" doc:name="Save File Payload"/>
+
+        <!-- Scatter-Gather for parallel audit tracking -->
+        <scatter-gather doc:name="Scatter-Gather File Initialization">
+            <route>
+                <logger level="INFO" doc:name="Route 1 Audit Logger" message="#['[Correlation ID: ' ++ vars.correlationId ++ '] Initializing parallel audit tracking for: ' ++ vars.sourceFileName]"/>
+            </route>
+            <route>
+                <ee:transform doc:name="Route 2 Build Metadata Payload">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  fileName: vars.sourceFileName,
+  correlationId: vars.correlationId,
+  status: "PARALLEL_INIT_COMPLETE",
+  timestamp: now()
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </route>
+        </scatter-gather>
+
+        <!-- Restore the raw file content back to the main payload -->
+        <set-payload value="#[vars.filePayload]" doc:name="Restore File Payload"/>
+
+        <!-- 1. Validate and Clean Rows using your DWL file -->
+        <ee:transform doc:name="Validate CSV Rows">
+            <ee:message>
+                <ee:set-payload resource="dwl/prepare-inventory-insert.dwl" />
+            </ee:message>
+        </ee:transform>
+
+        <!-- 2. Split into Valid and Invalid Variables -->
+        <ee:transform doc:name="Set Valid and Invalid Row Variables">
+            <ee:variables>
+                <ee:set-variable variableName="validRows"><![CDATA[%dw 2.0
+output application/java
+---
+payload filter ($.valid == true)
+                ]]></ee:set-variable>
+                <ee:set-variable variableName="invalidRows"><![CDATA[%dw 2.0
+output application/java
+---
+payload filter ($.valid == false)
+                ]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <!-- 3. Write Rejects File if Invalid Rows Exist -->
+        <choice doc:name="Check for Rejects">
+            <when expression="#[sizeOf(vars.invalidRows default []) > 0]">
+                <ee:transform doc:name="Format Rejects CSV">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/csv
+---
+vars.invalidRows map (row, index) -> {
+    lineNumber: index + 2,
+    sku: row.sku,
+    location: row.location,
+    countedQty: row.countedQty,
+    reasonCode: "INVALID_DATA",
+    reason: row.reason
+}
+                        ]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+                <!-- Creates the rejects file required by the hackathon -->
+                <file:write doc:name="Write Rejects File" path="#['C:\\data\\inventory\\rejects\\' ++ (vars.sourceFileName replace '.csv' with '_rejects.csv')]"/>
+            </when>
+        </choice>
+
+        <!-- 4. Call Database Processing Sub-Flow -->
+        <flow-ref doc:name="Call Database Snapshot Logic" name="inventory-process-snapshot-flow"/>
+
+        <!-- 5. Final Step: Move to archive/error and send the summary email -->
+        <flow-ref doc:name="Call Disposition Flow" name="file-disposition-and-notification-flow"/>
+
+    </flow>
+</mule>

@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:email="http://www.mulesoft.org/schema/mule/email"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+        http://www.mulesoft.org/schema/mule/email http://www.mulesoft.org/schema/mule/email/current/mule-email.xsd">
+
+    <!-- Scheduled execution for the Low-Stock Digest -->
+    <flow name="procurement-alerts-scheduled-flow" doc:id="17651587-90c4-4d0e-ad7c-4560a2a60525">
+        <scheduler doc:name="Daily Procurement Digest Scheduler">
+            <scheduling-strategy>
+                <fixed-frequency frequency="24" timeUnit="HOURS"/>
+            </scheduling-strategy>
+        </scheduler>
+        
+        <logger level="INFO" doc:name="Log Digest Start" message="Starting scheduled procurement low-stock digest run in Process API."/>
+        
+        <set-variable variableName="runTime" value="#[now()]" doc:name="Set Run Time"/>
+
+        <!-- FIX: Pointed config-ref to System API instead of Supplier API -->
+        <http:request method="GET" config-ref="HTTP_Request_configuration" path="/inventory/low-stock" doc:name="Fetch Low-Stock SKUs from SAPI"/>
+        
+        <!-- Transform DB result into the variable structure required by procurement-email-template.dwl -->
+        <ee:transform doc:name="Group and Prepare Email Variables">
+            <ee:variables>
+                <ee:set-variable variableName="skuCount"><![CDATA[%dw 2.0
+output application/java
+---
+sizeOf(payload default [])
+]]></ee:set-variable>
+                <ee:set-variable variableName="suppliers"><![CDATA[%dw 2.0
+output application/java
+---
+(payload default []) groupBy $.supplier_code mapObject ((lines, supplierCode) -> {
+    (supplierCode): {
+        supplierCode: supplierCode,
+        supplierName: "Supplier " ++ (supplierCode as String),
+        lines: lines map (l) -> {
+            sku: l.sku,
+            availableQty: l.available_qty,
+            reorderPoint: l.reorder_point,
+            reorderQty: l.reorder_qty,
+            openPo: "none", 
+            status: "PENDING"
+        }
+    }
+}) pluck $
+]]></ee:set-variable>
+                <ee:set-variable variableName="supplierCount"><![CDATA[%dw 2.0
+output application/java
+---
+sizeOf((payload default []) groupBy $.supplier_code)
+]]></ee:set-variable>
+                <!-- ADDED: Missing variables initialized to 0 -->
+                <ee:set-variable variableName="poRaisedCount"><![CDATA[%dw 2.0
+output application/java
+---
+0
+]]></ee:set-variable>
+                <ee:set-variable variableName="suppressedCount"><![CDATA[%dw 2.0
+output application/java
+---
+0
+]]></ee:set-variable>
+                <ee:set-variable variableName="failedCount"><![CDATA[%dw 2.0
+output application/java
+---
+0
+]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <!-- Format the final email payload -->
+        <ee:transform doc:name="Format Procurement Email Body">
+            <ee:message>
+                <ee:set-payload resource="dwl/procurement-email-template.dwl" />
+            </ee:message>
+        </ee:transform>
+
+        <!-- Send the digest via SMTP -->
+        <email:send doc:name="Send Low-Stock Digest" config-ref="Email_SMTP" fromAddress='#["billashiva15@gmail.com"]' subject="#[payload.subject]">
+            <email:to-addresses>
+				<email:to-address value="billashiva6606@gmail.com" />
+            </email:to-addresses>
+            <email:cc-addresses >
+				<email:cc-address value="bashaboinasusmitha@gmail.com" />
+			</email:cc-addresses>
+			<email:bcc-addresses >
+				<email:bcc-address value="rishithabathula58@gmail.com" />
+			</email:bcc-addresses>
+			<email:body contentType="text/plain">
+                <email:content><![CDATA[#[payload.body]]]></email:content>
+            </email:body>
+        </email:send>
+
+        <!-- Record the digest run via System API -->
+        <ee:transform doc:name="Prepare Digest Log Payload">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    fileName: "DIGEST_RUN",
+    fileChecksum: "N/A",
+    warehouseCode: "ALL",
+    status: "PROCESSED",
+    correlationId: "DIGEST-" ++ uuid()
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        
+        <http:request method="POST" config-ref="HTTP_Request_configuration" path="/snapshot-logs" doc:name="Record Digest Run via SAPI"/>
+
+        <logger level="INFO" doc:name="Log Success" message="Procurement low-stock digest sent and recorded successfully."/>
+
+    </flow>
+
+    <!-- Immediate Alert Sub-Flow to handle Supplier API Failures -->
+    <sub-flow name="send-procurement-summary-alert-flow" doc:id="54eeb2e8-37ff-4d6b-945c-d09aae7063d4">
+        <logger level="INFO" doc:name="Log Alert Trigger" message="Triggering immediate procurement alert for supplier failure."/>
+        
+        <ee:transform doc:name="Format Failure Alert Email">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    to: "billashiva15@gmail.com",
+    cc: "billashiva15@gmail.com",
+    from: "billashiva15@gmail.com",
+    subject: "URGENT: Supplier Order Failure",
+    body: "A supplier purchase order has failed and requires immediate attention.\n\n" ++
+          "Failure Reason: " ++ (vars.supplierFailureReason default "MOQ Requirement Not Met") ++ "\n\n" ++
+          "Please check the integration logs for Correlation ID: " ++ (vars.correlationId default "N/A")
+}
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <email:send doc:name="Send Immediate Failure Alert" config-ref="Email_SMTP" fromAddress="billashiva15@gmail.com" subject="#[payload.subject]">
+            <email:to-addresses>
+				<email:to-address value="billashiva6606@gmail.com" />
+            </email:to-addresses>
+            <email:cc-addresses>
+				<email:cc-address value="bashaboinasusmitha@gmail.com" />
+            </email:cc-addresses>
+            <email:bcc-addresses >
+				<email:bcc-address value="rishithabathula58@gmail.com" />
+			</email:bcc-addresses>
+			<email:body contentType="text/plain">
+                <email:content><![CDATA[#[payload.body]]]></email:content>
+            </email:body>
+        </email:send>
+    </sub-flow>
+
+</mule>

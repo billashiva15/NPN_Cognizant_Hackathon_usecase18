@@ -1,0 +1,184 @@
+#%RAML 1.0
+title: NPN Retail Inventory Experience API
+version: v1
+baseUri: http://localhost:8081/api/v1
+mediaType: [ application/json ]
+
+documentation:
+  - title: Overview
+    content: |
+      This Experience API acts as the consumer-facing digital storefront for the NPN Retail Supply Chain Dashboard.
+      It surfaces real-time stock levels, lets procurement track or force reorder processing, and provides full 
+      visibility into operational file-ingestion jobs.
+
+traits:
+  pageable:
+    queryParameters:
+      offset:
+        type: integer
+        required: false
+        default: 0
+        description: Number of records to skip.
+      limit:
+        type: integer
+        required: false
+        default: 20
+        description: Maximum number of records to return.
+
+types:
+  StockPosition:
+    properties:
+      sku: string
+      totalAvailableQty: integer
+      reorderPoint: integer
+      maximumLevel: integer
+      lastSnapshotTime: datetime
+      locations:
+        type: array
+        items:
+          properties:
+            locationCode: string
+            availableQty: integer
+            unitCost: number
+
+/stock:
+  get:
+    description: Retrieve absolute stock positions across all warehouses.
+    is: [ pageable ]
+    queryParameters:
+      status:
+        type: string
+        enum: [ ALL, LOW_STOCK ]
+        default: ALL
+        required: false
+    responses:
+      200:
+        body:
+          example: |
+            [
+              {
+                "sku": "SKU-HOME-5013",
+                "totalAvailableQty": 7,
+                "reorderPoint": 40,
+                "maximumLevel": 200,
+                "lastSnapshotTime": "2026-09-11T06:00:00Z",
+                "locations": [
+                  { "locationCode": "CHN-C-04", "availableQty": 7, "unitCost": 1299.00 }
+                ]
+              }
+            ]
+
+  /{sku}:
+    get:
+      description: Get granular item inventory locations for a single SKU.
+      responses:
+        200:
+          body:
+            type: StockPosition
+            example: |
+              {
+                "sku": "SKU-ELEC-2041",
+                "totalAvailableQty": 18,
+                "reorderPoint": 30,
+                "maximumLevel": 150,
+                "lastSnapshotTime": "2026-09-11T06:00:00Z",
+                "locations": [
+                  { "locationCode": "CHN-A-02", "availableQty": 18, "unitCost": 2410.00 }
+                ]
+              }
+        404:
+          body:
+            example: { "message": "SKU not found in master catalog." }
+
+/reorders:
+  get:
+    description: List reorder evaluation telemetry and history for dashboard viewing.
+    is: [ pageable ]
+    queryParameters:
+      status:
+        type: string
+        enum: [ PENDING, PO_RAISED, SUPPRESSED, FAILED ]
+        required: false
+    responses:
+      200:
+        body:
+          example: |
+            [
+              {
+                "eventId": "evt-2b7d4a19-8e03-4c6f-91ab-5d0e73f2c418",
+                "sku": "SKU-HOME-5013",
+                "warehouseCode": "WHCHN01",
+                "status": "PO_RAISED",
+                "poNumber": "SUP42-PO-556101",
+                "raisedAt": "2026-09-11T06:02:11.338Z"
+              },
+              {
+                "eventId": "evt-9a8b7c6d-5e4f-3g2h-1i0j-k9l8m7n6o5p4",
+                "sku": "SKU-ELEC-2041",
+                "warehouseCode": "WHCHN01",
+                "status": "SUPPRESSED",
+                "reasonCode": "OPEN_PO_EXISTS",
+                "poNumber": "PO-2026-000817",
+                "raisedAt": "2026-09-11T06:05:00Z"
+              }
+            ]
+
+  /manual/{sku}:
+    post:
+      description: Force a manual reorder evaluation outside the file loop.
+      responses:
+        202:
+          description: Manual request accepted into the reorder queue.
+          body:
+            example: |
+              {
+                "message": "Manual reorder event emitted successfully.",
+                "sku": "SKU-HOME-5013",
+                "source": "MANUAL",
+                "timestamp": "2026-09-14T21:05:00Z"
+              }
+        409:
+          description: Reorder suppressed because an open purchase order already satisfies this item.
+          body:
+            example: |
+              {
+                "message": "Reorder evaluation suppressed.",
+                "reasonCode": "OPEN_PO_EXISTS",
+                "openPurchaseOrder": "PO-2026-000817"
+              }
+
+/ingestion-jobs:
+  get:
+    description: Stream processing execution records for incoming warehouse data logs.
+    is: [ pageable ]
+    responses:
+      200:
+        body:
+          example: |
+            [
+              {
+                "snapshotId": 10482,
+                "fileName": "STOCK_WHCHN01_202609110600.csv",
+                "warehouseCode": "WHCHN01",
+                "status": "PROCESSED",
+                "totalRows": 25,
+                "acceptedRows": 21,
+                "rejectedRows": 4,
+                "skusChanged": 5,
+                "reorderEvents": 1,
+                "startedAt": "2026-09-11T06:00:01Z",
+                "finishedAt": "2026-09-11T06:00:14Z"
+              }
+            ]
+
+  /{snapshotId}/rejects:
+    get:
+      description: Fetch a precise breakdown of rows rejected during this historical ingestion run.
+      responses:
+        200:
+          body:
+            example: |
+              [
+                { "lineNumber": 4, "sku": "SKU-ELEC-9999", "reasonCode": "UNKNOWN_SKU", "reason": "SKU not in sku_master" },
+                { "lineNumber": 14, "sku": "SKU-TOOL-7781", "reasonCode": "NEGATIVE_QTY", "reason": "Quantity below zero" }
+              ]
