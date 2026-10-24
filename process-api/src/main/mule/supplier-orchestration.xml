@@ -9,55 +9,29 @@
         http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
         http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
 
-    <!-- Supplier External HTTP Request Configuration -->
     <!-- Supplier External HTTP Request Configuration (Local Postman Mock Server) -->
-    <http:request-config name="Supplier_HTTP_Request_Configuration" doc:name="Supplier HTTP Request configuration" doc:id="dc29d134-a851-4e34-96e8-3736aea4d80b">
-		<http:request-connection host="https://f96a1917-5eb2-4449-ba0d-c2d6a4026a80.mock.pstmn.io" port="443" protocol="HTTPS"/>
-	</http:request-config>
+    
 
-	<!-- ====================================================== -->
-    <!-- SUBMIT PURCHASE ORDER TO SUPPLIER                      -->
-    <!-- ====================================================== -->
-	<sub-flow name="supplier-submit-purchase-order-flow" doc:id="8fa87610-bf3d-42b0-a21d-0a9ab1a4e5d6">
+	<sub-flow name="supplier-submit-purchase-order-flow" doc:id="cda92f61-87d6-4e3b-b135-a6e2f53ba608">
 
-        <logger level="INFO"
-                doc:name="Supplier Submission Start"
-                message="#['Submitting supplier order for SKU: ' ++ (payload.sku default 'UNKNOWN') ++ ' with Correlation ID: ' ++ (vars.correlationId default 'NONE')]"/>
+        <logger level="INFO" doc:name="Supplier Submission Start" message="#['Submitting supplier order for SKU: ' ++ (payload.sku default 'UNKNOWN') ++ ' with Correlation ID: ' ++ (vars.correlationId default 'NONE')]"/>
 
-        <!-- Build supplier purchase order using external DWL script -->
         <ee:transform doc:name="Build Supplier Purchase Order Payload">
             <ee:message>
                 <ee:set-payload resource="dwl/build-supplier-order.dwl" />
             </ee:message>
         </ee:transform>
 
-        <!-- Preserve idempotency key variable for downstream error handling & validation -->
-        <set-variable variableName="supplierIdempotencyKey"
-                      value="#[payload.idempotencyKey]"/>
+        <set-variable variableName="supplierIdempotencyKey" value="#[payload.idempotencyKey]"/>
 
         <choice doc:name="Validate Supplier Order Payload">
-
-            <when expression="#[isEmpty(payload.supplierCode default '') 
-                or isEmpty(payload.deliverToWarehouse default '') 
-                or isEmpty(payload.lines default []) 
-                or (payload.lines[0].quantity default 0) &lt;= 0]">
-
-                <raise-error
-                    type="APP:INVALID_SUPPLIER_ORDER"
-                    description="Supplier order validation failed: missing mandatory fields or non-positive quantity."/>
-
+            <when expression="#[isEmpty(payload.supplierCode default '') or isEmpty(payload.deliverToWarehouse default '') or isEmpty(payload.lines default []) or (payload.lines[0].quantity default 0) &lt;= 0]">
+                <raise-error type="APP:INVALID_SUPPLIER_ORDER" description="Supplier order validation failed: missing mandatory fields or non-positive quantity."/>
             </when>
-
             <otherwise>
 
                 <!-- Send secure request to Supplier API endpoint -->
-                <http:request
-                    method="POST"
-                    path="/v2/purchase-orders"
-                    doc:name="Invoke Supplier API Endpoint"
-                    target="supplierResponse" 
-                    config-ref="Supplier_HTTP_Request_Configuration">
-
+                <http:request method="POST" path="/v2/purchase-orders" doc:name="Invoke Supplier API Endpoint" target="supplierResponse" targetValue="#[message]" config-ref="Supplier_HTTP_Request_Configuration">
                     <http:headers><![CDATA[#[{
                         "Content-Type": "application/json",
                         "Accept": "application/json",
@@ -65,80 +39,30 @@
                         "Idempotency-Key": vars.supplierIdempotencyKey,
                         "X-Correlation-ID": vars.correlationId
                     }]]]></http:headers>
-
-                    <!-- Response validator mapping standard & business error codes -->
                     <http:response-validator>
-                        <http:success-status-code-validator
-                            values="200..299,409,422,503"/>
+                        <http:success-status-code-validator values="200..299,409,422,503"/>
                     </http:response-validator>
-
                 </http:request>
 
                 <choice doc:name="Evaluate Supplier API Response Status">
-
-                    <!-- HTTP 409 Conflict: Duplicate Idempotency Key -> Reconcile as Success -->
                     <when expression="#[vars.supplierResponse.attributes.statusCode == 409]">
-                        <logger level="WARN"
-                                doc:name="Log Supplier Conflict"
-                                message="#['Supplier API returned HTTP 409 Conflict. Reconciling order via idempotency key: ' ++ vars.supplierIdempotencyKey]"/>
-
-                        <set-variable variableName="supplierResult"
-                                      value="#[{
-                                          outcome: 'RECONCILIATION_REQUIRED',
-                                          statusCode: vars.supplierResponse.attributes.statusCode,
-                                          idempotencyKey: vars.supplierIdempotencyKey,
-                                          responseBody: vars.supplierResponse.payload
-                                      }]"/>
+                        <logger level="WARN" doc:name="Log Supplier Conflict" message="#['Supplier API returned HTTP 409 Conflict. Reconciling order via idempotency key: ' ++ vars.supplierIdempotencyKey]"/>
+                        <set-variable variableName="supplierResult" value="#[{ outcome: 'RECONCILIATION_REQUIRED', statusCode: vars.supplierResponse.attributes.statusCode, idempotencyKey: vars.supplierIdempotencyKey, responseBody: vars.supplierResponse.payload }]"/>
                     </when>
-
-                    <!-- HTTP 422 Unprocessable Entity: MOQ Not Met -> Permanent Business Rejection -->
                     <when expression="#[vars.supplierResponse.attributes.statusCode == 422]">
-                        <logger level="ERROR"
-                                doc:name="Log MOQ Rejection"
-                                message="#['Supplier API returned HTTP 422 Unprocessable Entity (MOQ violation).']"/>
-
-                        <set-variable variableName="supplierResult"
-                                      value="#[{
-                                          outcome: 'MOQ_REJECTED',
-                                          statusCode: vars.supplierResponse.attributes.statusCode,
-                                          responseBody: vars.supplierResponse.payload
-                                      }]"/>
+                        <logger level="ERROR" doc:name="Log MOQ Rejection" message="#['Supplier API returned HTTP 422 Unprocessable Entity (MOQ violation).']"/>
+                        <set-variable variableName="supplierResult" value="#[{ outcome: 'MOQ_REJECTED', statusCode: vars.supplierResponse.attributes.statusCode, responseBody: vars.supplierResponse.payload }]"/>
                     </when>
-
-                    <!-- HTTP 503 Service Unavailable -> Transient Error Handling -->
                     <when expression="#[vars.supplierResponse.attributes.statusCode == 503]">
-                        <logger level="ERROR"
-                                doc:name="Log Service Unavailable"
-                                message="Supplier service returned HTTP 503 Unavailable. Triggering retry/backoff flow."/>
-
-                        <set-variable variableName="supplierResult"
-                                      value="#[{
-                                          outcome: 'TRANSIENT_ERROR',
-                                          statusCode: vars.supplierResponse.attributes.statusCode,
-                                          responseBody: vars.supplierResponse.payload
-                                      }]"/>
+                        <logger level="ERROR" doc:name="Log Service Unavailable" message="Supplier service returned HTTP 503 Unavailable. Triggering retry/backoff flow."/>
+                        <set-variable variableName="supplierResult" value="#[{ outcome: 'TRANSIENT_ERROR', statusCode: vars.supplierResponse.attributes.statusCode, responseBody: vars.supplierResponse.payload }]"/>
                     </when>
-
-                    <!-- Standard Success (2xx) -->
                     <otherwise>
-                        <logger level="INFO"
-                                doc:name="Log Successful Submission"
-                                message="Supplier API successfully accepted purchase order."/>
-
-                        <set-variable variableName="supplierResult"
-                                      value="#[{
-                                          outcome: 'SUBMITTED',
-                                          statusCode: vars.supplierResponse.attributes.statusCode,
-                                          idempotencyKey: vars.supplierIdempotencyKey,
-                                          responseBody: vars.supplierResponse.payload
-                                      }]"/>
+                        <logger level="INFO" doc:name="Log Successful Submission" message="Supplier API successfully accepted purchase order."/>
+                        <set-variable variableName="supplierResult" value="#[{ outcome: 'SUBMITTED', statusCode: vars.supplierResponse.attributes.statusCode, idempotencyKey: vars.supplierIdempotencyKey, responseBody: vars.supplierResponse.payload }]"/>
                     </otherwise>
-
                 </choice>
-
             </otherwise>
         </choice>
-
     </sub-flow>
-
 </mule>

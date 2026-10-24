@@ -12,7 +12,7 @@
         http://www.mulesoft.org/schema/mule/email http://www.mulesoft.org/schema/mule/email/current/mule-email.xsd">
 
     <!-- Scheduled execution for the Low-Stock Digest -->
-    <flow name="procurement-alerts-scheduled-flow" doc:id="17651587-90c4-4d0e-ad7c-4560a2a60525">
+    <flow name="procurement-alerts-scheduled-flow" doc:id="03eed8a8-cf8e-438a-9dc8-bf1a4b01cc87">
         <scheduler doc:name="Daily Procurement Digest Scheduler">
             <scheduling-strategy>
                 <fixed-frequency frequency="24" timeUnit="HOURS"/>
@@ -23,7 +23,7 @@
         
         <set-variable variableName="runTime" value="#[now()]" doc:name="Set Run Time"/>
 
-        <!-- FIX: Pointed config-ref to System API instead of Supplier API -->
+        <!-- UPDATED: config-ref now points to System API (localhost:8082) -->
         <http:request method="GET" config-ref="HTTP_Request_configuration" path="/inventory/low-stock" doc:name="Fetch Low-Stock SKUs from SAPI"/>
         
         <!-- Transform DB result into the variable structure required by procurement-email-template.dwl -->
@@ -57,7 +57,6 @@ output application/java
 ---
 sizeOf((payload default []) groupBy $.supplier_code)
 ]]></ee:set-variable>
-                <!-- ADDED: Missing variables initialized to 0 -->
                 <ee:set-variable variableName="poRaisedCount"><![CDATA[%dw 2.0
 output application/java
 ---
@@ -97,7 +96,8 @@ output application/java
 			<email:body contentType="text/plain">
                 <email:content><![CDATA[#[payload.body]]]></email:content>
             </email:body>
-        </email:send>
+        
+</email:send>
 
         <!-- Record the digest run via System API -->
         <ee:transform doc:name="Prepare Digest Log Payload">
@@ -122,7 +122,7 @@ output application/json
     </flow>
 
     <!-- Immediate Alert Sub-Flow to handle Supplier API Failures -->
-    <sub-flow name="send-procurement-summary-alert-flow" doc:id="54eeb2e8-37ff-4d6b-945c-d09aae7063d4">
+    <sub-flow name="send-procurement-summary-alert-flow" doc:id="4f9f2105-1e32-4a57-97eb-ae24bf580497">
         <logger level="INFO" doc:name="Log Alert Trigger" message="Triggering immediate procurement alert for supplier failure."/>
         
         <ee:transform doc:name="Format Failure Alert Email">

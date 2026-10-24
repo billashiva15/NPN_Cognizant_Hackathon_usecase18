@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+    <munit:config name="reorder-orchestration-test-suite.xml" />
+
+    <!-- ====================================================================== -->
+    <!-- TEST 1: PUBLISHER FLOW SUCCESS                                         -->
+    <!-- ====================================================================== -->
+    <munit:test name="publisher-flow-success-test" doc:id="41671d5f-e1bc-48e0-8e0b-bcaa274bb2c9" description="Test manual reorder publishes to AMQP successfully">
+        <munit:behavior>
+            <munit-tools:mock-when processor="amqp:publish" doc:name="Mock AMQP Publish">
+                <munit-tools:then-return>
+                    <munit-tools:payload value='#[%dw 2.0 output application/json --- { "sku": "SKU-HOME-9999" }]' mediaType="application/json"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="Set Manual Event">
+                <munit:payload value='#[%dw 2.0 output application/json --- { "sku": "SKU-HOME-9999" }]' mediaType="application/json" />
+            </munit:set-event>
+            <flow-ref doc:name="Flow-ref to publisher" name="http-to-amqp-reorder-publisher"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="Assert Status Queued" expression="#[payload.status]" is="#[MunitTools::equalTo('QUEUED')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ====================================================================== -->
+    <!-- TEST 2: CONSUMER SUCCESS (SUBMITTED)                                   -->
+    <!-- ====================================================================== -->
+    <munit:test name="consumer-flow-submitted-test" doc:id="d50be9f3-4987-4a50-bf5d-706a6b797264" description="Test consumer processes and saves new PO">
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request" doc:name="Mock SAPI HTTP Requests">
+                <munit-tools:then-return><munit-tools:payload value="#[{ success: true }]"/></munit-tools:then-return>
+            </munit-tools:mock-when>
+
+            <munit-tools:mock-when processor="flow-ref" doc:name="Mock Supplier Sub-Flow (SUBMITTED)">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="name" whereValue="supplier-submit-purchase-order-flow" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:variables>
+                        <munit-tools:variable key="supplierResult" value="#[{ outcome: 'SUBMITTED', responseBody: { supplierPoNumber: 'PO-NEW-123' } }]" mediaType="application/java"/>
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="Set AMQP Queue Event">
+                <munit:payload value='#[%dw 2.0 output application/json --- { "sku": "SKU-HOME-9999", "eventId": "evt-abc", "correlationId": "corr-12345" }]' mediaType="application/json" />
+            </munit:set-event>
+            <flow-ref doc:name="Flow-ref to consumer" name="inventory-reorder-consumer-flow"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call doc:name="Verify SAPI PO Creation" processor="http:request" times="1">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="path" whereValue="/purchase-orders" />
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ====================================================================== -->
+    <!-- TEST 3: CONSUMER OPEN ORDER ALREADY PRESENT (RECONCILIATION)           -->
+    <!-- ====================================================================== -->
+    <munit:test name="consumer-flow-open-order-present-test" doc:id="21ccab89-ad4c-4d73-8c72-fb6b58f0d181" description="Test consumer intercepts open order and reconciles">
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request" doc:name="Mock SAPI HTTP Requests">
+                <munit-tools:then-return><munit-tools:payload value="#[{ success: true }]"/></munit-tools:then-return>
+            </munit-tools:mock-when>
+
+            <munit-tools:mock-when processor="flow-ref" doc:name="Mock Supplier Sub-Flow (RECONCILIATION)">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="name" whereValue="supplier-submit-purchase-order-flow" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:variables>
+                        <munit-tools:variable key="supplierResult" value="#[{ outcome: 'RECONCILIATION_REQUIRED', responseBody: { existingSupplierPoNumber: 'PO-EXISTING-888' } }]" mediaType="application/java"/>
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="Set AMQP Queue Event">
+                <munit:payload value='#[%dw 2.0 output application/json --- { "sku": "SKU-HOME-9999", "eventId": "evt-abc", "correlationId": "corr-12345" }]' mediaType="application/json" />
+            </munit:set-event>
+            <flow-ref doc:name="Flow-ref to consumer" name="inventory-reorder-consumer-flow"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call doc:name="Verify Existing SAPI PO Reconciled" processor="http:request" times="1">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="path" whereValue="/purchase-orders" />
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ====================================================================== -->
+    <!-- TEST 4: CONSUMER MOQ REJECTED (RAISES ERROR)                           -->
+    <!-- ====================================================================== -->
+    <munit:test name="consumer-flow-moq-rejected-test" doc:id="d229a273-1825-472d-a179-0ab1648170bf" description="Test consumer handles supplier rejection and raises error" expectedErrorType="APP:INVALID_SUPPLIER_ORDER">
+        <munit:behavior>
+            <munit-tools:mock-when processor="http:request" doc:name="Mock SAPI HTTP Requests">
+                <munit-tools:then-return><munit-tools:payload value="#[{ success: true }]"/></munit-tools:then-return>
+            </munit-tools:mock-when>
+
+            <munit-tools:mock-when processor="flow-ref" doc:name="Mock Supplier Sub-Flow (MOQ_REJECTED)">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="name" whereValue="supplier-submit-purchase-order-flow" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:variables>
+                        <munit-tools:variable key="supplierResult" value="#[{ outcome: 'MOQ_REJECTED', responseBody: { message: 'Minimum order quantity not met' } }]" mediaType="application/java"/>
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="Set AMQP Queue Event">
+                <munit:payload value='#[%dw 2.0 output application/json --- { "sku": "SKU-HOME-9999", "eventId": "evt-abc", "correlationId": "corr-12345" }]' mediaType="application/json" />
+            </munit:set-event>
+            <flow-ref doc:name="Flow-ref to consumer" name="inventory-reorder-consumer-flow"/>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call doc:name="Verify Status Updated to FAILED" processor="http:request" times="1">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="path" whereValue="/reorder-events/status" />
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+</mule>

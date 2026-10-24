@@ -1,18 +1,54 @@
 <?xml version="1.0" encoding="UTF-8"?>
-
-<mule xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+<mule xmlns:tls="http://www.mulesoft.org/schema/mule/tls"
+	xmlns:api-gateway="http://www.mulesoft.org/schema/mule/api-gateway"
+	xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
 	xmlns:http="http://www.mulesoft.org/schema/mule/http"
 	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 	xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/tls http://www.mulesoft.org/schema/mule/tls/current/mule-tls.xsd 
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd 
 http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd 
-http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd">
-	<http:listener-config name="inventory-httpListenerConfig">
-        <http:listener-connection host="0.0.0.0" port="8081" />
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd 
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd
+http://www.mulesoft.org/schema/mule/api-gateway http://www.mulesoft.org/schema/mule/api-gateway/current/mule-api-gateway.xsd">
+
+    <!-- 1. Environment & Property Configurations -->
+    <global-property doc:name="Global Property" name="env" value="dev" />
+    <configuration-properties doc:name="Configuration properties" file="${env}.yaml" />
+    
+    <secure-properties:config name="Secure_Properties_Config" doc:name="Secure Properties Config" file="${env}-secure.yaml" key="${secure.key}" >
+        <secure-properties:encrypt algorithm="AES" mode="CBC"/>
+    </secure-properties:config>
+
+    <!-- 2. Autodiscovery for API Manager (Security Policies) -->
+    <!-- Make sure the flowRef matches the name of your main APIKit router flow -->
+    <api-gateway:autodiscovery apiId="${api.id}" ignoreBasePath="true" doc:name="API Autodiscovery" flowRef="inventory-main" />
+
+    <!-- 3. Experience API HTTP Listener -->
+    <http:listener-config name="inventory-httpListenerConfig">
+        <http:listener-connection host="${http.host}" port="${http.port}" />
+        <!-- Note: To enable HTTPS, you would nest a <tls:context> here with a keystore -->
     </http:listener-config>
+    
     <apikit:config name="inventory-config" api="inventory.raml" outboundHeadersMapName="outboundHeaders" httpStatusVarName="httpStatus" keepApiBaseUri="true"/>
-	<http:request-config name="HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="3612d897-5865-458b-ba06-49fa98a556be" basePath="/process" >
-		<http:request-connection host="localhost" port="8082" />
-	</http:request-config>
-	
+    
+    <!-- 4. Process API HTTP Requester -->
+    <http:request-config name="HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="7c2fac3e-dde5-4ca4-a8b9-6566b53e4262" basePath="${process.api.basePath}" >
+        <http:request-connection host="${process.api.host}" port="${process.api.port}" />
+        <!-- Default headers to securely authenticate against the Process API -->
+        <http:default-headers >
+            <http:default-header key="client_id" value="${secure::process.api.client_id}" />
+            <http:default-header key="client_secret" value="${secure::process.api.client_secret}" />
+        </http:default-headers>
+    </http:request-config>
+    
+    <!-- 5. Database Configuration (Secured) -->
+    <db:config name="Database_Config" doc:name="Database Config" doc:id="fe4451df-486e-495b-8a7f-50b05c395693" >
+        <db:my-sql-connection host="${db.host}" port="${db.port}" user="${secure::db.user}" password="${secure::db.password}" database="${db.database}" />
+    </db:config>
+
 </mule>

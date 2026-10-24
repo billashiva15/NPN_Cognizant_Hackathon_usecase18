@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit" 
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core" 
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<munit:config name="file-ingestion-test-suite.xml" />
+
+	<!-- ====================================================================== -->
+	<!-- TEST 1: CLEAN FILE SUCCESS PATH                                        -->
+	<!-- ====================================================================== -->
+	<munit:test name="test-clean-file-success" doc:id="e4ea22cf-8826-4357-a7fd-123aa460aaa4" description="Test processing a valid clean CSV file updates database successfully">
+		<munit:behavior>
+			<!-- Universal Mocks: Intercepts all DB and File calls regardless of doc:name -->
+			<munit-tools:mock-when processor="db:select" doc:name="Mock DB Selects (Not Duplicate, Not Stale)">
+				<munit-tools:then-return><munit-tools:payload value="#[[]]" mediaType="application/java" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:insert" doc:name="Mock DB Insert Log">
+				<munit-tools:then-return><munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:bulk-insert" doc:name="Mock DB Bulk Insert">
+				<munit-tools:then-return><munit-tools:payload value="#[{ affectedRows: 3 }]" mediaType="application/java" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="file:move" doc:name="Mock File Move">
+				<munit-tools:then-return><munit-tools:payload value="#[payload]" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="email:send" doc:name="Mock Email">
+				<munit-tools:then-return><munit-tools:payload value="#[payload]" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+
+		<munit:execution>
+			<munit:set-event doc:name="Set Event - Clean CSV Payload">
+				<munit:payload value="#[readUrl('classpath://clean-file.csv', 'text/plain')]" mediaType="application/csv" />
+				<munit:attributes value="#[{ fileName: 'STOCK_WHHYD01_202610200800.csv' }]" />
+			</munit:set-event>
+			<flow-ref doc:name="Flow-ref to inventory-file-ingestion-flow" name="inventory-file-ingestion-flow" />
+		</munit:execution>
+
+		<munit:validation>
+    <munit-tools:verify-call doc:name="Verify DB Stock Update Executed" processor="db:bulk-insert" atLeast="1" />
+</munit:validation>
+	</munit:test>
+
+	<!-- ====================================================================== -->
+	<!-- TEST 2: PARTIALLY INVALID FILE (ROW REJECTION)                        -->
+	<!-- ====================================================================== -->
+	<munit:test name="test-partially-invalid-file" doc:id="6453aa46-3aef-4124-8143-a388f18a8ec6" description="Test filtering bad rows to rejects while processing valid rows">
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select" doc:name="Mock DB Selects">
+				<munit-tools:then-return><munit-tools:payload value="#[[]]" mediaType="application/java" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:insert" doc:name="Mock DB Insert Log">
+				<munit-tools:then-return><munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:bulk-insert" doc:name="Mock DB Bulk Insert">
+				<munit-tools:then-return><munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="file:move" doc:name="Mock File Move">
+				<munit-tools:then-return><munit-tools:payload value="#[payload]" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="file:write" doc:name="Mock File Write Rejects">
+				<munit-tools:then-return><munit-tools:payload value="#[payload]" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+
+		<munit:execution>
+			<munit:set-event doc:name="Set Event - Invalid CSV Payload">
+				<munit:payload value="#[readUrl('classpath://invalid-file.csv', 'text/plain')]" mediaType="application/csv" />
+				<munit:attributes value="#[{ fileName: 'STOCK_WHHYD01_202610200815.csv' }]" />
+			</munit:set-event>
+			<flow-ref doc:name="Flow-ref to inventory-file-ingestion-flow" name="inventory-file-ingestion-flow" />
+		</munit:execution>
+
+		<munit:validation>
+			<munit-tools:verify-call doc:name="Verify Rejects File Written" processor="file:write" times="1" />
+		</munit:validation>
+	</munit:test>
+
+	<!-- ====================================================================== -->
+	<!-- TEST 3: DUPLICATE FILE (CHECKSUM MATCH)                                -->
+	<!-- ====================================================================== -->
+	<munit:test name="test-duplicate-file-checksum-match" doc:id="b983650c-1857-4b67-aa4c-ae6b10d2d953" description="Test duplicate file detection via matching checksum skips processing">
+		<munit:behavior>
+			<!-- Returns 1 row to simulate a duplicate found in the DB -->
+			<munit-tools:mock-when processor="db:select" doc:name="Mock DB Select Duplicate">
+				<munit-tools:then-return><munit-tools:payload value="#[[{ snapshot_id: 101 }]]" mediaType="application/java" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:insert" doc:name="Mock DB Insert Log">
+				<munit-tools:then-return><munit-tools:payload value="#[{ affectedRows: 0 }]" mediaType="application/java" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:bulk-insert" doc:name="Mock DB Bulk Insert">
+				<munit-tools:then-return><munit-tools:payload value="#[{ affectedRows: 0 }]" mediaType="application/java" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="file:move" doc:name="Mock File Move">
+				<munit-tools:then-return><munit-tools:payload value="#[payload]" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+
+		<munit:execution>
+			<munit:set-event doc:name="Set Event - Duplicate Payload">
+				<munit:payload value="#[readUrl('classpath://duplicate-file.csv', 'text/plain')]" mediaType="application/csv" />
+				<munit:attributes value="#[{ fileName: 'STOCK_WHHYD01_202610182145.csv' }]" />
+			</munit:set-event>
+			<flow-ref doc:name="Flow-ref to inventory-file-ingestion-flow" name="inventory-file-ingestion-flow" />
+		</munit:execution>
+
+		<munit:validation>
+			<munit-tools:verify-call doc:name="Verify DB Stock Update Skipped" processor="db:bulk-insert" times="0" />
+		</munit:validation>
+	</munit:test>
+
+	<!-- ====================================================================== -->
+	<!-- TEST 4: STALE SNAPSHOT SKIPPED                                         -->
+	<!-- ====================================================================== -->
+	<munit:test name="test-stale-snapshot-skipped" doc:id="5d6ca99e-aee0-44c5-bd13-6e0e1ab17b00" description="Test older snapshot timestamp is skipped to prevent rolling back stock">
+		<munit:behavior>
+			<!-- Returns 1 row to force the logic to skip processing -->
+			<munit-tools:mock-when processor="db:select" doc:name="Mock DB Select Stale">
+				<munit-tools:then-return><munit-tools:payload value="#[[{ last_snapshot: '2026-10-30 12:00:00' }]]" mediaType="application/java" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:insert" doc:name="Mock DB Insert Log">
+				<munit-tools:then-return><munit-tools:payload value="#[{ affectedRows: 0 }]" mediaType="application/java" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:bulk-insert" doc:name="Mock DB Bulk Insert">
+				<munit-tools:then-return><munit-tools:payload value="#[{ affectedRows: 0 }]" mediaType="application/java" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="file:move" doc:name="Mock File Move">
+				<munit-tools:then-return><munit-tools:payload value="#[payload]" /></munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+
+		<munit:execution>
+			<munit:set-event doc:name="Set Event - Stale Payload">
+				<munit:payload value="#[readUrl('classpath://stale-file.csv', 'text/plain')]" mediaType="application/csv" />
+				<munit:attributes value="#[{ fileName: 'STOCK_WHHYD01_202610011200.csv' }]" />
+			</munit:set-event>
+			<flow-ref doc:name="Flow-ref to inventory-file-ingestion-flow" name="inventory-file-ingestion-flow" />
+		</munit:execution>
+
+		<munit:validation>
+			<munit-tools:verify-call doc:name="Verify DB Stock Update Skipped for Stale File" processor="db:bulk-insert" times="0" />
+		</munit:validation>
+	</munit:test>
+
+</mule>

@@ -1,14 +1,22 @@
 %dw 2.0
-output application/json
+output application/java
 ---
 {
-    subject: "Daily Procurement Digest: " ++ (vars.skuCount default 0) ++ " Items Below Reorder Point",
-    body: "Automated Daily Inventory Digest\n"
-          ++ "-----------------------------------\n"
-          ++ "Total SKUs requiring reorder : " ++ (vars.skuCount default 0) ++ "\n"
-          ++ "Total Suppliers affected     : " ++ (vars.supplierCount default 0) ++ "\n"
-          ++ "Purchase Orders Auto-Raised  : " ++ (vars.poRaisedCount default 0) ++ "\n"
-          ++ "Orders Suppressed (Rules)    : " ++ (vars.suppressedCount default 0) ++ "\n"
-          ++ "Order Failures               : " ++ (vars.failedCount default 0) ++ "\n\n"
-          ++ "Please review the system dashboard to approve pending Purchase Orders."
+    subject: "Stock Load SUCCESS - " ++ (vars.sourceFileName default "STOCK_WHHYD01_202610241002.csv"),
+    body: "Inventory Integration Load Summary
+--------------------------------------------------
+File Name     : " ++ (vars.sourceFileName default "STOCK_WHHYD01_202610241002.csv") ++ "
+Warehouse     : " ++ (vars.warehouseCode default "WHHYD01") ++ "
+Status        : SUCCESS
+
+Rows Read     : " ++ (vars.totalRows default 0) ++ "
+Rows Applied  : " ++ (vars.acceptedRows default 2) ++ "
+Rows Rejected : " ++ (vars.rejectedRows default 0) ++ "
+SKUs Changed  : " ++ (vars.skusChanged default 2) ++ "
+Reorder Events: " ++ (vars.reorderEvents default 0) ++ "
+
+Archived To   : " ++ (vars.targetDirectory default "C:/data/inventory/archive") ++ "/" ++ (vars.sourceFileName default "") ++ "
+Correlation ID: " ++ (vars.correlationId default "file-STOCK_WHHYD01_202610241002.csv") ++ "
+
+Inventory Integration Service"
 }

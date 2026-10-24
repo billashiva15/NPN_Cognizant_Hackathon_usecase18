@@ -11,9 +11,7 @@
         http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
         http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/current/mule-amqp.xsd">
 
-    <!-- Bridges HTTP requests from Experience API to RabbitMQ -->
-    <flow name="http-to-amqp-reorder-publisher" doc:id="ed443328-d9b0-432e-9d5e-eb2bd6063b66">
-        <!-- Transform incoming HTTP payload to match the schema expected by the consumer queue -->
+    <flow name="http-to-amqp-reorder-publisher" doc:id="8e00f2ac-519b-4ea7-ac3a-fe55789ef239">
         <ee:transform doc:name="Enrich Manual Reorder Payload">
             <ee:message>
                 <ee:set-payload><![CDATA[%dw 2.0
@@ -34,17 +32,13 @@ output application/json
             </ee:message>
         </ee:transform>
 
-        <!-- Publish to RabbitMQ using the AMQP default exchange -->
-        <!-- Publish to RabbitMQ using the AMQP default exchange -->
         <amqp:publish doc:name="Publish to Reorder Queue" config-ref="AMQP_Config">
-            <amqp:routing-keys>
-                <amqp:routing-key>inventory.reorder.queue</amqp:routing-key>
+            <amqp:routing-keys >
+                <amqp:routing-key value="inventory.reorder.queue" />
             </amqp:routing-keys>
             <amqp:message>
                 <amqp:body><![CDATA[#[payload]]]></amqp:body>
-                <amqp:headers><![CDATA[#[{
-                    correlationId: payload.correlationId
-                }]]]></amqp:headers>
+                <amqp:headers><![CDATA[#[{ correlationId: payload.correlationId }]]]></amqp:headers>
             </amqp:message>
         </amqp:publish>
 
@@ -62,47 +56,54 @@ output application/json
         </ee:transform>
     </flow>
 
-	<flow name="inventory-reorder-consumer-flow" doc:id="3b9cf14a-d7bd-4ee3-960d-15383cd4b6c8">
-        <!-- Listen to the queue off the file processing thread -->
+	<flow name="inventory-reorder-consumer-flow" doc:id="461bde90-a144-4b17-8c96-b455e090d587">
         <amqp:listener doc:name="Consume Reorder Queue" config-ref="AMQP_Config" queueName="inventory.reorder.queue" ackMode="AUTO" numberOfConsumers="1">
 			<amqp:fallback-queue-definition />
         </amqp:listener>
 
-        <!-- Parse AMQP message and store it to preserve data across external HTTP calls -->
+        <!-- Safe DataWeave check: handles empty string/binary payloads gracefully -->
         <ee:transform doc:name="Parse Payload &amp; Store Variables">
             <ee:message>
                 <ee:set-payload><![CDATA[%dw 2.0
 output application/json
+var rawText = (payload as String default "")
+var parsedPayload = if (isEmpty(trim(rawText))) {} else (read(rawText, "application/json") default {})
 ---
-payload]]></ee:set-payload>
+parsedPayload]]></ee:set-payload>
             </ee:message>
             <ee:variables>
                 <ee:set-variable variableName="queuePayload"><![CDATA[%dw 2.0
 output application/json
+var rawText = (payload as String default "")
+var parsedPayload = if (isEmpty(trim(rawText))) {} else (read(rawText, "application/json") default {})
 ---
-payload]]></ee:set-variable>
-                <ee:set-variable variableName="correlationId"><![CDATA[attributes.headers.correlationId.bytes default payload.correlationId]]></ee:set-variable>
+parsedPayload]]></ee:set-variable>
+                <ee:set-variable variableName="correlationId"><![CDATA[%dw 2.0
+output application/java
+var rawText = (payload as String default "")
+var parsedPayload = if (isEmpty(trim(rawText))) {} else (read(rawText, "application/json") default {})
+---
+parsedPayload.correlationId default uuid()]]></ee:set-variable>
                 <ee:set-variable variableName="internalPoNumber"><![CDATA['PO-' ++ uuid()[0 to 7]]]></ee:set-variable>
             </ee:variables>
         </ee:transform>
 
-        <logger level="INFO" doc:name="Log Pickup" message="#['[Correlation ID: ' ++ vars.correlationId ++ '] Consumed reorder event for SKU: ' ++ vars.queuePayload.sku]"/>
-
-        <!-- 1. Claim the reorder event (PENDING) via System API Call -->
+        <logger level="INFO" doc:name="Log Pickup" 
+        message="#[%dw 2.0 output application/java --- '[Correlation ID: ' ++ (vars.correlationId default '') ++ '] Consumed reorder event for SKU: ' ++ (vars.queuePayload.sku default 'UNKNOWN')]"/>
         <ee:transform doc:name="Prepare Pending Reorder Payload">
             <ee:message>
                 <ee:set-payload><![CDATA[%dw 2.0
 output application/json
 ---
 {
-    eventId: vars.queuePayload.eventId,
-    sku: vars.queuePayload.sku,
-    warehouseCode: vars.queuePayload.warehouseCode,
-    supplierCode: vars.queuePayload.supplierCode,
-    availableQty: vars.queuePayload.availableQtyAllLocations,
-    reorderPoint: vars.queuePayload.reorderPoint,
-    reorderQty: vars.queuePayload.reorderQty,
-    source: vars.queuePayload.source,
+    eventId: vars.queuePayload.eventId default ("evt-" ++ uuid()),
+    sku: vars.queuePayload.sku default "UNKNOWN",
+    warehouseCode: vars.queuePayload.warehouseCode default "WHHYD01",
+    supplierCode: vars.queuePayload.supplierCode default "SUP-001",
+    availableQty: vars.queuePayload.availableQtyAllLocations default 0,
+    reorderPoint: vars.queuePayload.reorderPoint default 0,
+    reorderQty: vars.queuePayload.reorderQty default 0,
+    source: vars.queuePayload.source default "SYSTEM",
     correlationId: vars.correlationId,
     status: "PENDING"
 }]]></ee:set-payload>
@@ -111,18 +112,12 @@ output application/json
         
         <http:request method="POST" config-ref="HTTP_Request_configuration" path="/reorder-events/pending" target="sapiPendingResponse" doc:name="Save Pending Event to SAPI"/>
 
-        <!-- Restore payload from variable just to be absolutely safe for the supplier DWL -->
         <set-payload value="#[vars.queuePayload]" doc:name="Restore Queue Payload"/>
 
-        <!-- 2. Trigger outbound supplier API sub-flow -->
-        <flow-ref name="supplier-submit-purchase-order-flow" doc:name="Call Supplier API Sub-Flow" doc:id="3ca2ca2c-c266-4ef1-aead-c304bafb511b"/>
+        <flow-ref name="supplier-submit-purchase-order-flow" doc:name="Call Supplier API Sub-Flow" doc:id="04132251-69ab-4d4a-984a-2ec2626dcf07"/>
 
-        <!-- 3. Route actions based on supplier API response outcomes -->
         <choice doc:name="Evaluate Supplier Result">
-            
-            <!-- Standard Success or 409 Idempotency Reconciliation -->
             <when expression="#[vars.supplierResult.outcome == 'SUBMITTED' or vars.supplierResult.outcome == 'RECONCILIATION_REQUIRED']">
-                
                 <ee:transform doc:name="Prepare PO Persist Payload">
                     <ee:message>
                         <ee:set-payload><![CDATA[%dw 2.0
@@ -130,42 +125,35 @@ output application/json
 ---
 {
     poNumber: vars.internalPoNumber,
-    supplierCode: vars.queuePayload.supplierCode,
-    supplierPoNo: vars.supplierResult.responseBody.supplierPoNumber default vars.supplierResult.responseBody.existingSupplierPoNumber,
-    sku: vars.queuePayload.sku,
-    warehouseCode: vars.queuePayload.warehouseCode,
-    orderedQty: vars.queuePayload.reorderQty,
-    unitCost: vars.queuePayload.unitCost,
-    idempotencyKey: vars.supplierIdempotencyKey,
-    eventId: vars.queuePayload.eventId
+    supplierCode: vars.queuePayload.supplierCode default "SUP-001",
+    supplierPoNo: vars.supplierResult.responseBody.supplierPoNumber default vars.supplierResult.responseBody.existingSupplierPoNumber default "SUP-PO-000",
+    sku: vars.queuePayload.sku default "UNKNOWN",
+    warehouseCode: vars.queuePayload.warehouseCode default "WHHYD01",
+    orderedQty: vars.queuePayload.reorderQty default 0,
+    unitCost: vars.queuePayload.unitCost default 0,
+    idempotencyKey: vars.supplierIdempotencyKey default uuid(),
+    eventId: vars.queuePayload.eventId default ("evt-" ++ uuid())
 }]]></ee:set-payload>
                     </ee:message>
                 </ee:transform>
-
                 <http:request method="POST" config-ref="HTTP_Request_configuration" path="/purchase-orders" doc:name="Persist Purchase Order via SAPI"/>
             </when>
-
-            <!-- 422 Unprocessable Entity -> Permanent Failure -->
             <when expression="#[vars.supplierResult.outcome == 'MOQ_REJECTED']">
-                
                 <ee:transform doc:name="Prepare Failure Update Payload">
                     <ee:message>
                         <ee:set-payload><![CDATA[%dw 2.0
 output application/json
 ---
 {
-    eventId: vars.queuePayload.eventId,
+    eventId: vars.queuePayload.eventId default ("evt-" ++ uuid()),
     status: "FAILED",
     failureReason: vars.supplierResult.responseBody.message default 'MOQ requirement not met'
 }]]></ee:set-payload>
                     </ee:message>
                 </ee:transform>
-                
                 <http:request method="POST" config-ref="HTTP_Request_configuration" path="/reorder-events/status" doc:name="Update Event FAILED via SAPI"/>
-                
-                <raise-error type="APP:INVALID_SUPPLIER_ORDER" description="#[vars.supplierResult.responseBody.message]"/>
+                <raise-error type="APP:INVALID_SUPPLIER_ORDER" description="#[vars.supplierResult.responseBody.message default 'MOQ requirement not met']"/>
             </when>
-
         </choice>
     </flow>
 </mule>

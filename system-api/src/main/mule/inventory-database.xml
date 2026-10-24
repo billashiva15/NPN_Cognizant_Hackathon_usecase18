@@ -12,10 +12,49 @@
         http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
 
     <!-- ====================================================== -->
+    <!-- SAPI HTTP LISTENER ENDPOINT FOR LOW-STOCK DIGEST       -->
+    <!-- Serves low-stock items requested by Process API (PAPI) -->
+    <!-- ====================================================== -->
+    <flow name="sapi-get-low-stock-flow" doc:id="96c77080-2039-42da-bd2b-f2cecfbd063d">
+    <!-- UPDATE: Added /system prefix to match PAPI and Postman requests -->
+    <http:listener config-ref="HTTP_Listener_config" path="/system/inventory/low-stock" allowedMethods="GET" doc:name="SAPI Listener /system/inventory/low-stock"/>
+    
+    <logger level="INFO" doc:name="Log Low Stock Request" message="[SAPI] Fetching low-stock inventory items from database."/>
+
+    <db:select config-ref="Database_Config" doc:name="Query Low Stock Items from DB">
+        <db:sql><![CDATA[
+            SELECT 
+                sku, 
+                'SUP-001' AS supplier_code, 
+                available_qty, 
+                10 AS reorder_point, 
+                50 AS reorder_qty 
+            FROM inventory_stock 
+            WHERE available_qty <= 10
+        ]]></db:sql>
+    </db:select>
+
+    <ee:transform doc:name="Format Low Stock JSON Response">
+        <ee:message>
+            <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload map (item) -> {
+    sku: item.sku,
+    supplier_code: item.supplier_code default "SUP-001",
+    available_qty: item.available_qty default 0,
+    reorder_point: item.reorder_point default 10,
+    reorder_qty: item.reorder_qty default 50
+}]]></ee:set-payload>
+        </ee:message>
+    </ee:transform>
+</flow>
+
+    <!-- ====================================================== -->
     <!-- SAPI HTTP LISTENER ENDPOINT FOR SNAPSHOT PROCESSING     -->
     <!-- Receives valid rows and metadata from Process API (PAPI)-->
     <!-- ====================================================== -->
-    <flow name="sapi-process-snapshot-endpoint-flow" doc:id="f276a659-069f-4d21-8d42-17601fd119af">
+    <flow name="sapi-process-snapshot-endpoint-flow" doc:id="a3d4920f-80ff-492f-9fc7-9926a54725d0">
         <http:listener config-ref="HTTP_Listener_config" path="/process-snapshot" doc:name="SAPI Listener /process-snapshot"/>
         
         <logger level="INFO" doc:name="Log SAPI Snapshot Request" message="#['[SAPI] Received snapshot request for file: ' ++ (payload.sourceFileName default 'unknown')]"/>
@@ -46,7 +85,7 @@ output application/json
     <!-- ====================================================== -->
     <!-- 1. Master Sub-Flow: Process Snapshot & Status Checks    -->
     <!-- ====================================================== -->
-    <sub-flow name="inventory-process-snapshot-flow" doc:id="2a23e06f-3c4c-407f-b541-87d5b1414040">
+    <sub-flow name="inventory-process-snapshot-flow" doc:id="94610b58-4eea-48a1-bd29-d7a06febb27f">
         <logger level="INFO" doc:name="Start Snapshot Processing" message="#['[SAPI Correlation ID: ' ++ vars.correlationId ++ '] Processing warehouse snapshot: ' ++ vars.sourceFileName]"/>
 
         <!-- Extract Warehouse Code and Timestamp from filename -->
@@ -179,7 +218,7 @@ timestampText as LocalDateTime {format: "yyyyMMddHHmm"}
     <!-- ====================================================== -->
     <!-- 2. Sub-Flow: High-Performance Batch Upsert            -->
     <!-- ====================================================== -->
-    <sub-flow name="db-upsert-absolute-inventory-levels" doc:id="c27f8254-26b8-4e36-9d0c-04791bc6efd8">
+    <sub-flow name="db-upsert-absolute-inventory-levels" doc:id="0201b204-8cb2-4164-868e-0104c21935e5">
         <ee:transform doc:name="Format Valid Rows for Bulk SQL">
             <ee:message>
                 <ee:set-payload><![CDATA[

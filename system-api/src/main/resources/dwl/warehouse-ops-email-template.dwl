@@ -1,18 +1,23 @@
 %dw 2.0
-output application/json
+output application/java
 ---
 {
-    subject: "Stock load " ++ (payload.loadStatus default "SUCCESS") ++ " - " ++ (vars.sourceFileName default "Unknown_File.csv"),
-    body: "Inventory Integration Load Summary\n" ++
-          "-----------------------------------\n" ++
-          "File          : " ++ (vars.sourceFileName default "") ++ "\n" ++
-          "Warehouse     : " ++ (vars.warehouseCode default "Unknown") ++ "\n" ++
-          "Status        : " ++ (payload.loadStatus default "SUCCESS") ++ "\n\n" ++
-          "Rows read     : " ++ (payload.totalRows default 0) ++ "\n" ++
-          "Rows applied  : " ++ (payload.acceptedRows default 0) ++ "\n" ++
-          "Rows rejected : " ++ (payload.rejectedRows default 0) ++ "\n" ++
-          "SKUs changed  : " ++ (payload.skusChanged default 0) ++ "\n" ++
-          "Reorder events: " ++ (payload.reorderEvents default 0) ++ "\n\n" ++
-          "Archived to   : " ++ (vars.archivePath default "") ++ "\n" ++
-          "Correlation ID: " ++ (vars.correlationId default "")
+    subject: "Stock Load SUCCESS - " ++ (vars.sourceFileName default "N/A"),
+    body: "Inventory Integration Load Summary
+--------------------------------------------------
+File Name     : " ++ (vars.sourceFileName default "N/A") ++ "
+Warehouse     : " ++ (vars.warehouseCode default "WHHYD01") ++ "
+Status        : SUCCESS
+
+Rows Read     : " ++ (payload.totalRows default 0) ++ "
+Rows Applied  : " ++ (payload.acceptedRows default 0) ++ "
+Rows Rejected : " ++ (payload.rejectedRows default 0) ++ "
+SKUs Changed  : " ++ (payload.skusChanged default 0) ++ "
+Reorder Events: " ++ (payload.reorderEvents default 0) ++ "
+
+Archived To   : " ++ (vars.targetDirectory default "C:/data/inventory/archive") ++ "/" ++ (vars.sourceFileName default "") ++ "
+Correlation ID: " ++ (vars.correlationId default "N/A") ++ "
+
+Inventory Integration Service
+Nurture Partner Network (NPN) - Cognizant"
 }

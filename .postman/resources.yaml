@@ -1,0 +1,10 @@
+# Use this workspace to collaborate
+workspace:
+  id: 3aa85843-6018-47e5-b4ab-3646f391800d
+
+localResources:
+  specs:
+    - ../Raml/inventory.raml
+    - ../experience-api/target/classes/api/inventory.raml
+    - ../experience-api/src/main/resources/api/inventory.raml
+    - ../experience-api/target/META-INF/mule-src/experience-api/src/main/resources/api/inventory.raml

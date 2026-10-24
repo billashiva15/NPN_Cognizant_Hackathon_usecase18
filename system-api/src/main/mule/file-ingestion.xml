@@ -9,7 +9,7 @@
 		http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
 		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
 	
-	<flow name="inventory-file-ingestion-flow" doc:id="b6a59b5b-8659-4e29-a468-36609c419de1">
+	<flow name="inventory-file-ingestion-flow" doc:id="4a978688-1825-4439-9759-1af8c5dfa757">
         <file:listener doc:name="Poll Inventory CSV Files" 
                         directory="C:\data\inventory\inbound" 
                         recursive="false" 
@@ -50,6 +50,26 @@ output application/json
 
         <!-- Restore the raw file content back to the main payload -->
         <set-payload value="#[vars.filePayload]" doc:name="Restore File Payload"/>
+
+        <!-- ========================================== -->
+        <!-- ADDED: Generate Cryptographic File Digest  -->
+        <!-- ========================================== -->
+        <!-- ========================================== -->
+        <!-- ADDED: Generate Cryptographic File Digest  -->
+        <!-- ========================================== -->
+        <ee:transform doc:name="Generate File Digest">
+            <ee:variables>
+                <ee:set-variable variableName="fileChecksum"><![CDATA[%dw 2.0
+import * from dw::Crypto
+import * from dw::core::Binaries
+output application/java
+---
+toBase64(hashWith(write(vars.filePayload, "application/csv") as Binary, "SHA-256"))
+]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <!-- ========================================== -->
+        <!-- ========================================== -->
 
         <!-- 1. Validate and Clean Rows using your DWL file -->
         <ee:transform doc:name="Validate CSV Rows">

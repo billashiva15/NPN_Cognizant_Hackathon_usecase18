@@ -9,10 +9,6 @@
         http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd 
         http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
 
-    <db:config name="Database_Config" doc:name="Database Config" doc:id="9bf94d53-7491-485b-b41e-5659138f775e" >
-		<db:my-sql-connection host="localhost" port="3306" user="root" password="root123" database="npn_retail_inventory_db" />
-	</db:config>
-
     <!-- 1. GET /stock -->
 	<flow name="get:\stock:inventory-config">
         <db:select config-ref="Database_Config" doc:name="Select All Stock">

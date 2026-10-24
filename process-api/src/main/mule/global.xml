@@ -1,26 +1,50 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<mule xmlns:email="http://www.mulesoft.org/schema/mule/email" xmlns:amqp="http://www.mulesoft.org/schema/mule/amqp"
+<mule xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
+	xmlns:email="http://www.mulesoft.org/schema/mule/email" 
+	xmlns:amqp="http://www.mulesoft.org/schema/mule/amqp"
 	xmlns:http="http://www.mulesoft.org/schema/mule/http"
-	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+	xmlns="http://www.mulesoft.org/schema/mule/core" 
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" 
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+	xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
 http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
 http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/current/mule-amqp.xsd
-http://www.mulesoft.org/schema/mule/email http://www.mulesoft.org/schema/mule/email/current/mule-email.xsd">
-	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="43c14f51-bf9e-4a52-bf73-16ed119d5b11" >
-		<http:listener-connection host="0.0.0.0" port="8082" />
+http://www.mulesoft.org/schema/mule/email http://www.mulesoft.org/schema/mule/email/current/mule-email.xsd
+http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd">
+
+	<!-- Environment & Secure Properties Setup -->
+	<global-property doc:name="Global Property" name="env" value="dev" />
+	<configuration-properties doc:name="Configuration properties" file="${env}.yaml" />
+	
+	<secure-properties:config name="Process_Secure_Properties_Config" doc:name="Secure Properties Config" file="${env}-secure.yaml" key="${secure.key}" >
+		<secure-properties:encrypt algorithm="AES" mode="CBC"/>
+	</secure-properties:config>
+
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="ac406803-1648-4836-b0a9-81ddf13c115a" >
+		<http:listener-connection host="0.0.0.0" port="${http.port}" />
 	</http:listener-config>
-	<http:request-config name="HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="83d7ccb1-8b06-4350-a540-d1b8710387bb" basePath="/system" >
-		<http:request-connection host="localhost" port="8083" />
+	
+	<http:request-config name="HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="3932e74a-dabc-43bf-8eec-586d94a96d81" basePath="/system" >
+		<http:request-connection host="${system.host}" port="${system.port}" />
 	</http:request-config>
-	<amqp:config name="AMQP_Config" doc:name="AMQP Config" doc:id="69e4e1e7-7c67-43d5-bc18-be1cb136831b" >
-		<amqp:connection host="puffin-01.rmq2.cloudamqp.com" port="5672" virtualHost="bzrxdyst" username="bzrxdyst" password="4ylQ1Finvtx8orR55rUKZbknYva9OJSm" />
+	
+	<amqp:config name="AMQP_Config" doc:name="AMQP Config" doc:id="bc5016a3-acd8-42cf-b60a-ab20e577b312" >
+		<amqp:connection host="${amqp.host}" port="${amqp.port}" virtualHost="${amqp.virtualHost}" username="${amqp.username}" password="${secure::amqp.password}" />
 	</amqp:config>
-	<email:smtp-config name="Email_SMTP" doc:name="Email SMTP" doc:id="997772a1-f94e-40e0-898c-07c75f8e1f58" >
-		<email:smtp-connection host="smtp.gmail.com" user="billashiva15@gmail.com" password="qslb siqw zkfd jktk" port="587">
+	
+	<email:smtp-config name="Email_SMTP" doc:name="Email SMTP" doc:id="f71112fd-e2a8-467d-a85c-ef125cd23705" >
+		<email:smtp-connection host="${email.host}" user="${email.user}" password="${secure::email.password}" port="${email.port}">
 			<email:properties >
 				<email:property key="mail.smtp.starttls.enable" value="true" />
 			</email:properties>
 		</email:smtp-connection>
 	</email:smtp-config>
+	
 	<configuration defaultErrorHandler-ref="papi-global-error-handler"/>
+	
+	<http:request-config name="Supplier_HTTP_Request_Configuration" doc:name="Supplier HTTP Request configuration" doc:id="6cec0899-d136-45fa-827c-86b653a60406">
+		<http:request-connection host="b8acbe4f-4b34-42ca-967d-d52eb7046464.mock.pstmn.io" port="443" protocol="HTTPS"/>
+	</http:request-config>
 </mule>

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit" xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+	
+	<munit:config name="supplier-orchestration-test-suite.xml" />
+
+	<!-- ====================================================================== -->
+	<!-- TEST 1: SUPPLIER SUCCESS (HTTP 200)                                    -->
+	<!-- ====================================================================== -->
+	<munit:test name="supplier-submit-success-test" doc:id="979fe9c2-7047-4400-b5c8-a2ad6cbf2883" description="Test supplier sub-flow handles successful purchase order submission">
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request" doc:name="Mock HTTP Request Return 200 Target Var">
+				<munit-tools:then-return>
+					<munit-tools:variables>
+						<munit-tools:variable key="supplierResponse" value="#[%dw 2.0 output application/json --- { attributes: { statusCode: 200 }, payload: { supplierPoNumber: 'PO-SUPPLIER-999' } }]" mediaType="application/json" />
+					</munit-tools:variables>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<munit:set-event doc:name="Set Valid Order Payload">
+				<munit:payload value='#[%dw 2.0 output application/json --- { supplierCode: "SUPP-01", deliverToWarehouse: "WH-A", idempotencyKey: "key-success", lines: [{ quantity: 10 }] }]' mediaType="application/json" />
+			</munit:set-event>
+			<flow-ref doc:name="Flow-ref to supplier-submit-purchase-order-flow" name="supplier-submit-purchase-order-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that doc:name="Assert Outcome is SUBMITTED" expression="#[vars.supplierResult.outcome]" is="#[MunitTools::equalTo('SUBMITTED')]" />
+		</munit:validation>
+	</munit:test>
+
+	<!-- ====================================================================== -->
+	<!-- TEST 2: SUPPLIER 503 (TRANSIENT ERROR)                                 -->
+	<!-- ====================================================================== -->
+	<munit:test name="supplier-503-transient-error-test" doc:id="8c15a763-4c93-48e6-bff1-31a5e9e82a03" description="Test supplier sub-flow handles HTTP 503 service unavailable outcome">
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request" doc:name="Mock HTTP Request Return 503 Target Var">
+				<munit-tools:then-return>
+					<munit-tools:variables>
+						<munit-tools:variable key="supplierResponse" value="#[{ attributes: { statusCode: 503 }, payload: { error: 'Service Unavailable' } }]" mediaType="application/java" />
+					</munit-tools:variables>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<munit:set-event doc:name="Set Valid Order Payload">
+				<munit:payload value='#[%dw 2.0 output application/json --- { supplierCode: "SUPP-01", deliverToWarehouse: "WH-A", idempotencyKey: "key-503", lines: [{ quantity: 10 }] }]' mediaType="application/json" />
+			</munit:set-event>
+			<flow-ref doc:name="Flow-ref to supplier-submit-purchase-order-flow" name="supplier-submit-purchase-order-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that doc:name="Assert Outcome is TRANSIENT_ERROR" expression="#[vars.supplierResult.outcome]" is="#[MunitTools::equalTo('TRANSIENT_ERROR')]" />
+		</munit:validation>
+	</munit:test>
+
+	<!-- ====================================================================== -->
+	<!-- TEST 3: SUPPLIER 422 (MOQ / CLIENT ERROR)                              -->
+	<!-- ====================================================================== -->
+	<munit:test name="supplier-4xx-moq-rejected-test" doc:id="b8bcaf5d-eccc-4dea-bf1f-84aadd6fcaca" description="Test supplier sub-flow handles HTTP 422 Unprocessable Entity error">
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request" doc:name="Mock HTTP Request Return 422 Target Var">
+				<munit-tools:then-return>
+					<munit-tools:variables>
+						<munit-tools:variable key="supplierResponse" value="#[{ attributes: { statusCode: 422 }, payload: { message: 'Minimum order quantity not satisfied' } }]" mediaType="application/java" />
+					</munit-tools:variables>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<munit:set-event doc:name="Set Valid Order Payload">
+				<munit:payload value='#[%dw 2.0 output application/json --- { supplierCode: "SUPP-01", deliverToWarehouse: "WH-A", idempotencyKey: "key-422", lines: [{ quantity: 10 }] }]' mediaType="application/json" />
+			</munit:set-event>
+			<flow-ref doc:name="Flow-ref to supplier-submit-purchase-order-flow" name="supplier-submit-purchase-order-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that doc:name="Assert Outcome is MOQ_REJECTED" expression="#[vars.supplierResult.outcome]" is="#[MunitTools::equalTo('MOQ_REJECTED')]" />
+		</munit:validation>
+	</munit:test>
+
+</mule>

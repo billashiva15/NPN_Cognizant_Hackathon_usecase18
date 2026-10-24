@@ -1,0 +1,17 @@
+http:
+  host: "0.0.0.0"
+  port: "8081"
+
+api:
+  id: "12345678" # Replace with your actual API Manager Autodiscovery ID
+
+process:
+  api:
+    host: "localhost"
+    port: "8082"
+    basePath: "/process"
+
+db:
+  host: "localhost"
+  port: "3306"
+  database: "npn_retail_inventory_db"

@@ -1,0 +1,14 @@
+http:
+  port: "8082"
+system:
+  host: "localhost"
+  port: "8083"
+amqp:
+  host: "puffin-01.rmq2.cloudamqp.com"
+  port: "5672"
+  virtualHost: "bzrxdyst"
+  username: "bzrxdyst"
+email:
+  host: "smtp.gmail.com"
+  user: "billashiva15@gmail.com"
+  port: "587"

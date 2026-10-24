@@ -17,12 +17,10 @@ traits:
       offset:
         type: integer
         required: false
-        default: 0
         description: Number of records to skip.
       limit:
         type: integer
         required: false
-        default: 20
         description: Maximum number of records to return.
 
 types:
@@ -49,7 +47,6 @@ types:
       status:
         type: string
         enum: [ ALL, LOW_STOCK ]
-        default: ALL
         required: false
     responses:
       200:

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit" xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+	
+	<munit:config name="digest-generation-test-suite.xml" />
+
+	<munit:test name="test-digest-generation-success" doc:id="88888888-8888-8888-8888-888888888888" description="Verify SHA-256 digest is correctly generated for incoming files">
+		<munit:behavior>
+			<!-- Stop the flow from actually writing to the DB or sending emails during the test -->
+			<munit-tools:mock-when processor="flow-ref" doc:name="Mock Database Processing">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="name" whereValue="inventory-process-snapshot-flow" />
+				</munit-tools:with-attributes>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="flow-ref" doc:name="Mock Disposition Flow">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="name" whereValue="file-disposition-and-notification-flow" />
+				</munit-tools:with-attributes>
+			</munit-tools:mock-when>
+            <!-- Mock the DW row validation to prevent external file dependencies in this test -->
+            <munit-tools:mock-when processor="ee:transform" doc:name="Mock Row Validation">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="Validate CSV Rows" />
+				</munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[payload]"/>
+                </munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		
+		<munit:execution>
+			<munit:set-event doc:name="Set Mock CSV Payload">
+				<munit:payload value='sku,location,countedQty&#10;SKU-123,WH-A,50' mediaType="application/csv" />
+				<munit:attributes value="#[{ fileName: 'STOCK_WHHYD01_202610231055.csv' }]" />
+			</munit:set-event>
+			<flow-ref doc:name="Call File Ingestion Flow" name="inventory-file-ingestion-flow"/>
+		</munit:execution>
+		
+		<munit:validation>
+			<!-- Assert the checksum was generated and is not null -->
+			<munit-tools:assert-that doc:name="Assert Checksum Exists" expression="#[vars.fileChecksum]" is="#[MunitTools::notNullValue()]" />
+            
+            <!-- Assert it generated a Base64 SHA-256 string (44 characters long) -->
+            <munit-tools:assert-that doc:name="Assert Checksum Format" expression="#[sizeOf(vars.fileChecksum)]" is="#[MunitTools::equalTo(44)]" />
+		</munit:validation>
+	</munit:test>
+
+</mule>
