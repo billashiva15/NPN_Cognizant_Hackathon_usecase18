@@ -1,18 +1,18 @@
 %dw 2.0
 output application/json
+var dbRow = payload[0] default {}
 ---
-// Since it's a single item, we take the first row [0] from the DB array
-if (isEmpty(payload)) {} else {
-    sku: payload[0].sku default "",
-    totalAvailableQty: payload[0].available_qty default 0,
-    reorderPoint: payload[0].reorder_point default 0,
-    maximumLevel: payload[0].maximum_level default 0,
-    lastSnapshotTime: payload[0].last_updated default "",
+{
+    sku: dbRow.sku default "",
+    totalAvailableQty: dbRow.available_qty default 0,
+    reorderPoint: 10,
+    maximumLevel: 100,
+    lastSnapshotTime: dbRow.last_counted_at default "",
     locations: [
         {
-            locationCode: payload[0].warehouse_code default "",
-            availableQty: payload[0].available_qty default 0,
-            unitCost: 0.00
+            locationCode: dbRow.location_code default "",
+            availableQty: dbRow.available_qty default 0,
+            unitCost: dbRow.unit_cost default 0.00
         }
     ]
 }

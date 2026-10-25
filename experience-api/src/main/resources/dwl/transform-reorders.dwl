@@ -2,7 +2,7 @@
 output application/json
 ---
 payload map (dbRow) -> {
-    eventId: dbRow.id default "", // Adjust if your primary key is named differently
+    eventId: dbRow.po_number default "", 
     sku: dbRow.sku default "",
     warehouseCode: dbRow.warehouse_code default "",
     status: dbRow.status default "",

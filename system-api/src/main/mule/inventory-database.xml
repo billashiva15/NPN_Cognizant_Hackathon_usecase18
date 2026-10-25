@@ -156,21 +156,21 @@ timestampText as LocalDateTime {format: "yyyyMMddHHmm"}
                     <otherwise>
                         <!-- Initialize Snapshot Log as IN_PROGRESS -->
                         <db:insert config-ref="Database_Config" doc:name="Create IN_PROGRESS Snapshot Log">
-                            <db:sql><![CDATA[
-                                INSERT INTO snapshot_log (file_name, file_checksum, warehouse_code, snapshot_ts, status, total_rows, accepted_rows, rejected_rows, correlation_id, started_at)
-                                VALUES (:fileName, :fileChecksum, :warehouseCode, :snapshotTs, 'IN_PROGRESS', :totalRows, 0, 0, :correlationId, CURRENT_TIMESTAMP)
-                            ]]></db:sql>
-                            <db:input-parameters><![CDATA[
-                                #[{
-                                    fileName: vars.sourceFileName,
-                                    fileChecksum: vars.fileChecksum default uuid(),
-                                    warehouseCode: vars.warehouseCode,
-                                    snapshotTs: vars.snapshotTimestamp,
-                                    totalRows: sizeOf(vars.validRows default []) + sizeOf(vars.invalidRows default []),
-                                    correlationId: vars.correlationId
-                                }]
-                            ]]></db:input-parameters>
-                        </db:insert>
+    <db:sql><![CDATA[
+        INSERT INTO snapshot_log (file_name, file_checksum, warehouse_code, snapshot_ts, status, total_rows, accepted_rows, rejected_rows, correlation_id, started_at)
+        VALUES (:fileName, :fileChecksum, :warehouseCode, :snapshotTs, 'IN_PROGRESS', :totalRows, 0, 0, :correlationId, CURRENT_TIMESTAMP)
+    ]]></db:sql>
+    <db:input-parameters><![CDATA[
+        #[{
+            fileName: vars.sourceFileName,
+            fileChecksum: vars.fileChecksum default uuid(),
+            warehouseCode: vars.warehouseCode,
+            snapshotTs: vars.snapshotTimestamp,
+            totalRows: sizeOf(vars.validRows default []) + sizeOf(vars.invalidRows default []),
+            correlationId: vars.correlationId
+        }]
+    ]]></db:input-parameters>
+</db:insert>
 
                         <!-- Retrieve Generated snapshot_id -->
                         <db:select config-ref="Database_Config" doc:name="Fetch Snapshot ID">
@@ -277,5 +277,93 @@ output application/java
             </error-handler>
         </try>
     </sub-flow>
+    <!-- ====================================================== -->
+    <!-- SAPI HTTP LISTENER: Record Pending Reorder Event       -->
+    <!-- ====================================================== -->
+    <flow name="sapi-record-pending-event-flow" doc:id="72cfaf9d-28ba-4fc3-b9f5-eebe19087d31">
+        <http:listener config-ref="HTTP_Listener_config" path="/system/api/v1/reorder-events/pending" allowedMethods="POST" doc:name="SAPI Listener /system/api/v1/reorder-events/pending"/>
+        
+        <db:insert config-ref="Database_Config" doc:name="Insert Pending Event">
+            <db:sql><![CDATA[
+                INSERT INTO reorder_events (event_id, sku, warehouse_code, supplier_code, available_qty, reorder_point, reorder_qty, status, source, correlation_id)
+                VALUES (:eventId, :sku, :warehouseCode, :supplierCode, :availableQty, :reorderPoint, :reorderQty, 'PENDING', :source, :correlationId)
+            ]]></db:sql>
+            <db:input-parameters><![CDATA[
+                #[{
+                    eventId: payload.eventId,
+                    sku: payload.sku,
+                    warehouseCode: payload.warehouseCode,
+                    supplierCode: payload.supplierCode,
+                    availableQty: payload.availableQty,
+                    reorderPoint: payload.reorderPoint,
+                    reorderQty: payload.reorderQty,
+                    source: payload.source,
+                    correlationId: payload.correlationId
+                }]
+            ]]></db:input-parameters>
+        </db:insert>
+        
+        <set-payload value='{"message": "Pending event recorded"}'/>
+    </flow>
 
+    <!-- ====================================================== -->
+    <!-- SAPI HTTP LISTENER: Persist Purchase Order & Success   -->
+    <!-- ====================================================== -->
+    <flow name="sapi-persist-purchase-order-flow" doc:id="37a75e5b-11f2-40ec-b9e1-5c2e06be8691">
+        <http:listener config-ref="HTTP_Listener_config" path="/system/api/v1/purchase-orders" allowedMethods="POST" doc:name="SAPI Listener /system/api/v1/purchase-orders"/>
+        
+        <db:insert config-ref="Database_Config" doc:name="Insert Purchase Order">
+    <db:sql><![CDATA[
+        INSERT INTO purchase_orders (po_number, supplier_code, supplier_po_no, sku, warehouse_code, ordered_qty, unit_cost, idempotency_key, status)
+        VALUES (:poNumber, :supplierCode, :supplierPoNo, :sku, :warehouseCode, :orderedQty, :unitCost, :idempotencyKey, :status)
+    ]]></db:sql>
+    <db:input-parameters><![CDATA[#[{
+        poNumber: payload.poNumber,
+        supplierCode: payload.supplierCode,
+        supplierPoNo: payload.supplierPoNo,
+        sku: payload.sku,
+        warehouseCode: payload.warehouseCode,
+        orderedQty: payload.orderedQty,
+        unitCost: payload.unitCost,
+        idempotencyKey: payload.idempotencyKey,
+        status: payload.status default 'CREATED'
+    }]]]></db:input-parameters>
+</db:insert>
+
+        <db:update config-ref="Database_Config" doc:name="Update Event Status PO_RAISED">
+            <db:sql><![CDATA[
+                UPDATE reorder_events SET status = 'PO_RAISED', po_number = :poNumber WHERE event_id = :eventId
+            ]]></db:sql>
+            <db:input-parameters><![CDATA[
+                #[{
+                    poNumber: payload.poNumber,
+                    eventId: payload.eventId
+                }]
+            ]]></db:input-parameters>
+        </db:update>
+        
+        <set-payload value='{"message": "PO persisted and event updated"}'/>
+    </flow>
+
+    <!-- ====================================================== -->
+    <!-- SAPI HTTP LISTENER: Update Event Status to FAILED      -->
+    <!-- ====================================================== -->
+    <flow name="sapi-update-event-status-flow" doc:id="36127132-3698-4f7e-9a6f-9dad4d24c9d2">
+       <http:listener config-ref="HTTP_Listener_config" path="/system/api/v1/reorder-events/status" allowedMethods="POST" doc:name="SAPI Listener /system/api/v1/reorder-events/status"/>
+        
+        <db:update config-ref="Database_Config" doc:name="Update Event Status">
+            <db:sql><![CDATA[
+                UPDATE reorder_events SET status = :status, failure_reason = :failureReason WHERE event_id = :eventId
+            ]]></db:sql>
+            <db:input-parameters><![CDATA[
+                #[{
+                    status: payload.status,
+                    failureReason: payload.failureReason,
+                    eventId: payload.eventId
+                }]
+            ]]></db:input-parameters>
+        </db:update>
+        
+        <set-payload value='{"message": "Event status updated"}'/>
+    </flow>
 </mule>

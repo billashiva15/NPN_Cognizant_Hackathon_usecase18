@@ -110,7 +110,7 @@ output application/json
             </ee:message>
         </ee:transform>
         
-        <http:request method="POST" config-ref="HTTP_Request_configuration" path="/reorder-events/pending" target="sapiPendingResponse" doc:name="Save Pending Event to SAPI"/>
+        <http:request method="POST" config-ref="HTTP_Request_configuration" path="/system/api/v1/reorder-events/pending" target="sapiPendingResponse" doc:name="Save Pending Event to SAPI"/>
 
         <set-payload value="#[vars.queuePayload]" doc:name="Restore Queue Payload"/>
 
@@ -136,8 +136,9 @@ output application/json
 }]]></ee:set-payload>
                     </ee:message>
                 </ee:transform>
-                <http:request method="POST" config-ref="HTTP_Request_configuration" path="/purchase-orders" doc:name="Persist Purchase Order via SAPI"/>
-            </when>
+				<http:request method="POST" config-ref="HTTP_Request_configuration" path="/system/api/v1/purchase-orders" doc:name="Persist Purchase Order via SAPI"/>
+            
+</when>
             <when expression="#[vars.supplierResult.outcome == 'MOQ_REJECTED']">
                 <ee:transform doc:name="Prepare Failure Update Payload">
                     <ee:message>
@@ -151,7 +152,7 @@ output application/json
 }]]></ee:set-payload>
                     </ee:message>
                 </ee:transform>
-                <http:request method="POST" config-ref="HTTP_Request_configuration" path="/reorder-events/status" doc:name="Update Event FAILED via SAPI"/>
+                <http:request method="POST" config-ref="HTTP_Request_configuration" path="/system/api/v1/reorder-events/status" doc:name="Update Event FAILED via SAPI"/>
                 <raise-error type="APP:INVALID_SUPPLIER_ORDER" description="#[vars.supplierResult.responseBody.message default 'MOQ requirement not met']"/>
             </when>
         </choice>
