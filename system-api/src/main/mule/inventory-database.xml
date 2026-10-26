@@ -15,7 +15,7 @@
     <!-- SAPI HTTP LISTENER ENDPOINT FOR LOW-STOCK DIGEST       -->
     <!-- Serves low-stock items requested by Process API (PAPI) -->
     <!-- ====================================================== -->
-    <flow name="sapi-get-low-stock-flow" doc:id="96c77080-2039-42da-bd2b-f2cecfbd063d">
+    <flow name="sapi-get-low-stock-flow" doc:id="2e66f294-0fec-43fd-8931-b57af11e13a9">
     <!-- UPDATE: Added /system prefix to match PAPI and Postman requests -->
     <http:listener config-ref="HTTP_Listener_config" path="/system/inventory/low-stock" allowedMethods="GET" doc:name="SAPI Listener /system/inventory/low-stock"/>
     
@@ -54,7 +54,7 @@ payload map (item) -> {
     <!-- SAPI HTTP LISTENER ENDPOINT FOR SNAPSHOT PROCESSING     -->
     <!-- Receives valid rows and metadata from Process API (PAPI)-->
     <!-- ====================================================== -->
-    <flow name="sapi-process-snapshot-endpoint-flow" doc:id="a3d4920f-80ff-492f-9fc7-9926a54725d0">
+    <flow name="sapi-process-snapshot-endpoint-flow" doc:id="fc685b04-3b53-49bc-9315-f830342c697b">
         <http:listener config-ref="HTTP_Listener_config" path="/process-snapshot" doc:name="SAPI Listener /process-snapshot"/>
         
         <logger level="INFO" doc:name="Log SAPI Snapshot Request" message="#['[SAPI] Received snapshot request for file: ' ++ (payload.sourceFileName default 'unknown')]"/>
@@ -85,7 +85,7 @@ output application/json
     <!-- ====================================================== -->
     <!-- 1. Master Sub-Flow: Process Snapshot & Status Checks    -->
     <!-- ====================================================== -->
-    <sub-flow name="inventory-process-snapshot-flow" doc:id="94610b58-4eea-48a1-bd29-d7a06febb27f">
+    <sub-flow name="inventory-process-snapshot-flow" doc:id="b2151a73-e954-4d44-8d5b-5cf9e316f183">
         <logger level="INFO" doc:name="Start Snapshot Processing" message="#['[SAPI Correlation ID: ' ++ vars.correlationId ++ '] Processing warehouse snapshot: ' ++ vars.sourceFileName]"/>
 
         <!-- Extract Warehouse Code and Timestamp from filename -->
@@ -218,7 +218,7 @@ timestampText as LocalDateTime {format: "yyyyMMddHHmm"}
     <!-- ====================================================== -->
     <!-- 2. Sub-Flow: High-Performance Batch Upsert            -->
     <!-- ====================================================== -->
-    <sub-flow name="db-upsert-absolute-inventory-levels" doc:id="0201b204-8cb2-4164-868e-0104c21935e5">
+    <sub-flow name="db-upsert-absolute-inventory-levels" doc:id="d2835862-ffb5-4fa1-9f68-ce019dceeb80">
         <ee:transform doc:name="Format Valid Rows for Bulk SQL">
             <ee:message>
                 <ee:set-payload><![CDATA[
@@ -280,7 +280,7 @@ output application/java
     <!-- ====================================================== -->
     <!-- SAPI HTTP LISTENER: Record Pending Reorder Event       -->
     <!-- ====================================================== -->
-    <flow name="sapi-record-pending-event-flow" doc:id="72cfaf9d-28ba-4fc3-b9f5-eebe19087d31">
+    <flow name="sapi-record-pending-event-flow" doc:id="fefdb961-397b-468e-9e7a-42f114591ee3">
         <http:listener config-ref="HTTP_Listener_config" path="/system/api/v1/reorder-events/pending" allowedMethods="POST" doc:name="SAPI Listener /system/api/v1/reorder-events/pending"/>
         
         <db:insert config-ref="Database_Config" doc:name="Insert Pending Event">
@@ -309,7 +309,7 @@ output application/java
     <!-- ====================================================== -->
     <!-- SAPI HTTP LISTENER: Persist Purchase Order & Success   -->
     <!-- ====================================================== -->
-    <flow name="sapi-persist-purchase-order-flow" doc:id="37a75e5b-11f2-40ec-b9e1-5c2e06be8691">
+    <flow name="sapi-persist-purchase-order-flow" doc:id="b55b660d-0f8d-4024-9544-d6c2117fd8dd">
         <http:listener config-ref="HTTP_Listener_config" path="/system/api/v1/purchase-orders" allowedMethods="POST" doc:name="SAPI Listener /system/api/v1/purchase-orders"/>
         
         <db:insert config-ref="Database_Config" doc:name="Insert Purchase Order">
@@ -348,7 +348,7 @@ output application/java
     <!-- ====================================================== -->
     <!-- SAPI HTTP LISTENER: Update Event Status to FAILED      -->
     <!-- ====================================================== -->
-    <flow name="sapi-update-event-status-flow" doc:id="36127132-3698-4f7e-9a6f-9dad4d24c9d2">
+    <flow name="sapi-update-event-status-flow" doc:id="bb532ba7-e6a8-467a-b691-b6536da85f19">
        <http:listener config-ref="HTTP_Listener_config" path="/system/api/v1/reorder-events/status" allowedMethods="POST" doc:name="SAPI Listener /system/api/v1/reorder-events/status"/>
         
         <db:update config-ref="Database_Config" doc:name="Update Event Status">

@@ -1,13 +1,13 @@
 http:
-  port: "8083"
+  port: "${http.port}"
 
 db:
   host: "bore.pub"
-  port: "49228"
+  port: "29989"
   database: "npn_retail_inventory_db"
 
 file:
-  workingDir: "C:\\data\\inventory"
+  workingDir: "/tmp/inventory"
 
 email:
   host: "smtp.gmail.com"

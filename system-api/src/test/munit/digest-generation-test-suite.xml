@@ -23,14 +23,7 @@
 				</munit-tools:with-attributes>
 			</munit-tools:mock-when>
             <!-- Mock the DW row validation to prevent external file dependencies in this test -->
-            <munit-tools:mock-when processor="ee:transform" doc:name="Mock Row Validation">
-				<munit-tools:with-attributes>
-					<munit-tools:with-attribute attributeName="doc:name" whereValue="Validate CSV Rows" />
-				</munit-tools:with-attributes>
-                <munit-tools:then-return>
-                    <munit-tools:payload value="#[payload]"/>
-                </munit-tools:then-return>
-			</munit-tools:mock-when>
+            <!-- Mock the DW row validation to prevent external file dependencies in this test -->
 		</munit:behavior>
 		
 		<munit:execution>

@@ -11,7 +11,7 @@
         http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
         http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/current/mule-amqp.xsd">
 
-    <flow name="http-to-amqp-reorder-publisher" doc:id="8e00f2ac-519b-4ea7-ac3a-fe55789ef239">
+    <flow name="http-to-amqp-reorder-publisher" doc:id="5594c98f-a97f-4cc1-8235-c5c383c413f3">
         <ee:transform doc:name="Enrich Manual Reorder Payload">
             <ee:message>
                 <ee:set-payload><![CDATA[%dw 2.0
@@ -56,7 +56,7 @@ output application/json
         </ee:transform>
     </flow>
 
-	<flow name="inventory-reorder-consumer-flow" doc:id="461bde90-a144-4b17-8c96-b455e090d587">
+	<flow name="inventory-reorder-consumer-flow" doc:id="6752c70b-0bf0-4048-815d-e3394460e5b9">
         <amqp:listener doc:name="Consume Reorder Queue" config-ref="AMQP_Config" queueName="inventory.reorder.queue" ackMode="AUTO" numberOfConsumers="1">
 			<amqp:fallback-queue-definition />
         </amqp:listener>
@@ -114,7 +114,7 @@ output application/json
 
         <set-payload value="#[vars.queuePayload]" doc:name="Restore Queue Payload"/>
 
-        <flow-ref name="supplier-submit-purchase-order-flow" doc:name="Call Supplier API Sub-Flow" doc:id="04132251-69ab-4d4a-984a-2ec2626dcf07"/>
+        <flow-ref name="supplier-submit-purchase-order-flow" doc:name="Call Supplier API Sub-Flow" doc:id="f696d2c4-ff40-483b-9113-0991464ddf1a"/>
 
         <choice doc:name="Evaluate Supplier Result">
             <when expression="#[vars.supplierResult.outcome == 'SUBMITTED' or vars.supplierResult.outcome == 'RECONCILIATION_REQUIRED']">

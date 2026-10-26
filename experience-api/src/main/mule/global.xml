@@ -18,7 +18,7 @@ http://www.mulesoft.org/schema/mule/api-gateway http://www.mulesoft.org/schema/m
 
     <!-- 1. Environment & Property Configurations -->
     <global-property doc:name="Global Property" name="env" value="dev" />
-    <configuration-properties doc:name="Configuration properties" file="${env}.yaml" />
+    <configuration-properties doc:name="Configuration properties" file="dev.yaml"/>
     
     <secure-properties:config name="Secure_Properties_Config" doc:name="Secure Properties Config" file="${env}-secure.yaml" key="${secure.key}" >
         <secure-properties:encrypt algorithm="AES" mode="CBC"/>
@@ -47,8 +47,9 @@ http://www.mulesoft.org/schema/mule/api-gateway http://www.mulesoft.org/schema/m
     </http:request-config>
     
     <!-- 5. Database Configuration (Secured) -->
-    <db:config name="Database_Config" doc:name="Database Config" doc:id="fe4451df-486e-495b-8a7f-50b05c395693" >
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="2796f492-f50d-43ae-8447-7fea2c3a2f52" >
         <db:my-sql-connection host="${db.host}" port="${db.port}" user="${secure::db.user}" password="${secure::db.password}" database="${db.database}" />
     </db:config>
+
 
 </mule>
